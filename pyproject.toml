@@ -50,7 +50,8 @@ select = [
   "PIE",        # misc
 ]
 ignore = [
-  "PLR0912",  # too many branches  (decoders unavoidably branchy)
+  "PLR0911",  # too many returns (dispatch tables on Sel/Signal enums are naturally branchy)
+  "PLR0912",  # too many branches (decoders unavoidably branchy)
   "PLR0915",  # too many statements (same)
   "PLR2004",  # magic numbers in ISA tables are clearer inline
 ]
