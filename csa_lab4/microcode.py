@@ -33,6 +33,8 @@ class Signal(Enum):
     LATCH_TOS = auto()
     LATCH_FLAGS = auto()
     LATCH_M_PC = auto()
+    LATCH_A = auto()
+    LATCH_B = auto()
 
     DS_PUSH = auto()
     DS_POP = auto()
@@ -67,6 +69,14 @@ class Sel(Enum):
     AR_FROM_OPERAND = auto()
     AR_FROM_TOS = auto()
     AR_FROM_PC = auto()
+    AR_FROM_A = auto()
+    AR_FROM_B = auto()
+
+    # A / B sources
+    A_FROM_OPERAND = auto()
+    A_FROM_PLUS_ONE = auto()
+    B_FROM_OPERAND = auto()
+    B_FROM_PLUS_ONE = auto()
 
     # DR sources
     DR_FROM_MEM = auto()
@@ -169,6 +179,17 @@ M_DUP = 32
 M_DROP = 33
 M_SWAP = 34
 M_OVER = 35
+
+M_LDA = 36
+M_LDB = 37
+M_LDAI_1 = 38
+M_LDAI_2 = 39
+M_LDBI_1 = 40
+M_LDBI_2 = 41
+M_STAI_1 = 42
+M_STAI_2 = 43
+M_STBI_1 = 44
+M_STBI_2 = 45
 
 
 def _mi(label: str, *signals: SignalSpec) -> MicroInstr:
@@ -397,6 +418,65 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_TOP),
         _RET_FETCH,
     ),
+    # --- address registers A / B (pointer iteration with post-increment) ---
+    _mi(
+        "LDA",
+        (Signal.LATCH_A, Sel.A_FROM_OPERAND),
+        _RET_FETCH,
+    ),
+    _mi(
+        "LDB",
+        (Signal.LATCH_B, Sel.B_FROM_OPERAND),
+        _RET_FETCH,
+    ),
+    _mi(
+        "LDAI.1",
+        (Signal.LATCH_AR, Sel.AR_FROM_A),
+        _NEXT,
+    ),
+    _mi(
+        "LDAI.2",
+        (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_MEM),
+        (Signal.LATCH_A, Sel.A_FROM_PLUS_ONE),
+        _RET_FETCH,
+    ),
+    _mi(
+        "LDBI.1",
+        (Signal.LATCH_AR, Sel.AR_FROM_B),
+        _NEXT,
+    ),
+    _mi(
+        "LDBI.2",
+        (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_MEM),
+        (Signal.LATCH_B, Sel.B_FROM_PLUS_ONE),
+        _RET_FETCH,
+    ),
+    _mi(
+        "STAI.1",
+        (Signal.LATCH_AR, Sel.AR_FROM_A),
+        _NEXT,
+    ),
+    _mi(
+        "STAI.2",
+        (Signal.MEM_WRITE, Sel.MEM_WRITE_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
+        (Signal.LATCH_A, Sel.A_FROM_PLUS_ONE),
+        _RET_FETCH,
+    ),
+    _mi(
+        "STBI.1",
+        (Signal.LATCH_AR, Sel.AR_FROM_B),
+        _NEXT,
+    ),
+    _mi(
+        "STBI.2",
+        (Signal.MEM_WRITE, Sel.MEM_WRITE_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
+        (Signal.LATCH_B, Sel.B_FROM_PLUS_ONE),
+        _RET_FETCH,
+    ),
 )
 
 
@@ -429,4 +509,10 @@ DISPATCH: dict[Opcode, int] = {
     Opcode.DROP: M_DROP,
     Opcode.SWAP: M_SWAP,
     Opcode.OVER: M_OVER,
+    Opcode.LDA: M_LDA,
+    Opcode.LDB: M_LDB,
+    Opcode.LDAI: M_LDAI_1,
+    Opcode.LDBI: M_LDBI_1,
+    Opcode.STAI: M_STAI_1,
+    Opcode.STBI: M_STBI_1,
 }

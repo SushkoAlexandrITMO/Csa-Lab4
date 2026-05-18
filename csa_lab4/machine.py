@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -111,6 +112,8 @@ class DataPath:
     ar: int = 0
     dr: int = 0
     ir: int = 0
+    a: int = 0  # auxiliary address register A (16-bit pointer)
+    b: int = 0  # auxiliary address register B (16-bit pointer)
     flag_z: bool = False
     flag_n: bool = False
 
@@ -135,6 +138,8 @@ class Snapshot:
     tos: int
     ds_top: int
     rs_top: int
+    a: int
+    b: int
     flag_z: bool
     flag_n: bool
     operand_unsigned: int
@@ -155,6 +160,8 @@ def _snapshot(dp: DataPath) -> Snapshot:
         tos=_signed_word(dp.tos),
         ds_top=dp.ds[-1] if dp.ds else 0,
         rs_top=dp.rs[-1] if dp.rs else 0,
+        a=dp.a & ADDR_MASK,
+        b=dp.b & ADDR_MASK,
         flag_z=dp.flag_z,
         flag_n=dp.flag_n,
         operand_unsigned=operand_raw,
@@ -240,7 +247,27 @@ class ControlUnit:
             return snap.tos & ADDR_MASK
         if sel is Sel.AR_FROM_PC:
             return snap.pc & ADDR_MASK
+        if sel is Sel.AR_FROM_A:
+            return snap.a & ADDR_MASK
+        if sel is Sel.AR_FROM_B:
+            return snap.b & ADDR_MASK
         raise MachineError(f"bad AR selector: {sel}")
+
+    @staticmethod
+    def _next_a(sel: Sel | None, snap: Snapshot) -> int:
+        if sel is Sel.A_FROM_OPERAND:
+            return snap.operand_unsigned & ADDR_MASK
+        if sel is Sel.A_FROM_PLUS_ONE:
+            return (snap.a + 1) & ADDR_MASK
+        raise MachineError(f"bad A selector: {sel}")
+
+    @staticmethod
+    def _next_b(sel: Sel | None, snap: Snapshot) -> int:
+        if sel is Sel.B_FROM_OPERAND:
+            return snap.operand_unsigned & ADDR_MASK
+        if sel is Sel.B_FROM_PLUS_ONE:
+            return (snap.b + 1) & ADDR_MASK
+        raise MachineError(f"bad B selector: {sel}")
 
     @staticmethod
     def _next_dr(sel: Sel | None, snap: Snapshot) -> int:
@@ -313,6 +340,8 @@ class ControlUnit:
         next_dr = snap.dr
         next_ir = snap.ir
         next_tos = snap.tos
+        next_a = snap.a
+        next_b = snap.b
         next_z = snap.flag_z
         next_n = snap.flag_n
         next_m_pc = self.m_pc
@@ -345,6 +374,10 @@ class ControlUnit:
                 next_n = alu_result < 0
             elif sig is Signal.LATCH_M_PC:
                 next_m_pc = self._next_m_pc(sel, snap, self.m_pc)
+            elif sig is Signal.LATCH_A:
+                next_a = self._next_a(sel, snap)
+            elif sig is Signal.LATCH_B:
+                next_b = self._next_b(sel, snap)
             elif sig is Signal.DS_PUSH:
                 ds_push = True
             elif sig is Signal.DS_POP:
@@ -370,6 +403,8 @@ class ControlUnit:
         self.data_path.dr = _signed_word(next_dr)
         self.data_path.ir = next_ir & WORD_MASK
         self.data_path.tos = _signed_word(next_tos)
+        self.data_path.a = next_a & ADDR_MASK
+        self.data_path.b = next_b & ADDR_MASK
         self.data_path.flag_z = next_z
         self.data_path.flag_n = next_n
 
@@ -420,7 +455,7 @@ class ControlUnit:
         line = (
             f"T{self.tick_count:05d}  m_PC={self.m_pc:02d} {label:<10s}  "
             f"PC={dp.pc:04X}  IR={dp.ir & WORD_MASK:08X}  "
-            f"TOS={dp.tos:>11d}  "
+            f"TOS={dp.tos:>11d}  A={dp.a:04X} B={dp.b:04X}  "
             f"DS[{len(dp.ds)}]  RS[{len(dp.rs)}]  "
             f"Z={int(dp.flag_z)} N={int(dp.flag_n)}"
             f"{annotation}"
@@ -439,7 +474,24 @@ def load_binary(blob: bytes) -> list[int]:
     return [int.from_bytes(blob[i : i + 4], byteorder="little", signed=True) for i in range(0, len(blob), 4)]
 
 
-def simulate(binary: bytes, stdin_data: str, tick_limit: int) -> tuple[str, str]:
+TickHook = Callable[["ControlUnit"], bool]
+
+
+def simulate(
+    binary: bytes,
+    stdin_data: str,
+    tick_limit: int,
+    tick_hook: TickHook | None = None,
+) -> tuple[str, str]:
+    """Run the simulator.
+
+    ``tick_hook`` is invoked **after every tick** with the live ControlUnit.
+    Returning ``False`` cleanly stops the simulation at that tick boundary.
+    This is what enables tick-level interruption: any tick in the program may
+    be the last one, regardless of which microinstruction it executed. The
+    same effect is available from outside by driving :meth:`ControlUnit.tick`
+    directly.
+    """
     image = load_binary(binary)
     dp = DataPath.from_image(image)
     io = IO(input_buffer=[ord(c) for c in stdin_data])
@@ -449,9 +501,12 @@ def simulate(binary: bytes, stdin_data: str, tick_limit: int) -> tuple[str, str]
     try:
         while cu.tick_count < tick_limit:
             cu.tick()
+            if tick_hook is not None and not tick_hook(cu):
+                halt_reason = "stopped by tick hook"
+                break
     except HaltError as exc:
         halt_reason = str(exc)
-    if not cu.halted and cu.tick_count >= tick_limit:
+    if not halt_reason and not cu.halted and cu.tick_count >= tick_limit:
         halt_reason = f"tick limit reached ({tick_limit})"
 
     log_text = "\n".join(cu.log_lines)
