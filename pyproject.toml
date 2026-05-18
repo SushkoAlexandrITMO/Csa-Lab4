@@ -1,0 +1,78 @@
+[project]
+name = "csa-lab4"
+version = "0.1.0"
+description = "Lisp stack microcoded processor simulator (CSA Lab 4)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "pyyaml>=6",
+  "types-PyYAML>=6",
+]
+
+[project.scripts]
+translator = "csa_lab4.translator:main"
+machine = "csa_lab4.machine:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["csa_lab4*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+  "E", "W",     # pycodestyle
+  "F",          # pyflakes
+  "I",          # isort
+  "B",          # flake8-bugbear
+  "UP",         # pyupgrade
+  "SIM",        # simplify
+  "RUF",        # ruff-specific
+  "PL",         # pylint
+  "N",          # naming
+  "C4",         # comprehensions
+  "PTH",        # pathlib
+  "RET",        # return
+  "ARG",        # unused args
+  "TID",        # tidy imports
+  "PIE",        # misc
+]
+ignore = [
+  "PLR0911",  # too many returns (dispatch tables on Sel/Signal enums are naturally branchy)
+  "PLR0912",  # too many branches (decoders unavoidably branchy)
+  "PLR0915",  # too many statements (same)
+  "PLR2004",  # magic numbers in ISA tables are clearer inline
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "ARG001"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+files = ["csa_lab4", "tests"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

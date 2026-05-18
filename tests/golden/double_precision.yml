@@ -1,0 +1,68 @@
+description: 62-bit add via two 31-bit halves
+source: |
+  ; Double-precision (62-bit) addition demonstrated on top of 32-bit machine
+  ; words. We represent a 62-bit number as two 31-bit halves (hi, lo); each
+  ; half lives in one signed 32-bit machine word with the sign bit kept
+  ; clear. The carry from lo into hi is detected by observing the sign of the
+  ; native 32-bit addition: lo1 + lo2 fits in [0, 2^32-2], and when the result
+  ; >= 2^31 the native signed view becomes negative — exactly when a 31-bit
+  ; carry has occurred.
+  ;
+  ; Demonstrated case:
+  ;   A = (1, 2_000_000_000)
+  ;   B = (1, 1_500_000_000)
+  ;   A + B in true 62-bit arithmetic = 7_794_967_296
+  ;                                   = 3 * 2^31 + 1_352_516_352
+  ; Expected output:  hi=3 lo=1352516352
+
+  (setq pow31 2147483648)   ; bit pattern 0x80000000; ALU reads as -2^31
+
+  (setq ahi 1)
+  (setq alo 2000000000)
+  (setq bhi 1)
+  (setq blo 1500000000)
+
+  (setq lo-sum (+ alo blo))
+  (setq carry (if (< lo-sum 0) 1 0))
+  ; If carry: native sum wrapped past 2^31. Adding pow31 (whose ALU value is
+  ; -2^31) brings it back into the unsigned 0..2^31-1 range modulo 2^32.
+  (setq lo-final (if (< lo-sum 0) (+ lo-sum pow31) lo-sum))
+  (setq hi-final (+ ahi (+ bhi carry)))
+
+  (print-string "hi=")
+  (print-int hi-final)
+  (print-string " lo=")
+  (print-int lo-final)
+  (print-char 10)
+  (halt)
+stdin: ''
+expected_stdout: |
+  hi=3 lo=1352516352
+tick_limit: 1000000
+log_enabled: true
+log_head_lines: 8
+expected_log_head: |
+  T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00002  m_PC=04 DECODE      PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; JMP 0x1067
+  T00003  m_PC=00 JMP         PC=1067  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00004  m_PC=01 FETCH       PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00005  m_PC=02 DECODE      PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; NOP
+  T00006  m_PC=00 NOP         PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00007  m_PC=01 FETCH       PC=1069  IR=2000001A  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00008  m_PC=21 DECODE      PC=1069  IR=2000001A  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; LOAD 0x001A
+log_tail_lines: 4
+expected_log_tail: |
+  T01134  m_PC=01 FETCH       PC=10C7  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T01135  m_PC=03 DECODE      PC=10C7  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; HALT
+  T01136  m_PC=03 HALT        PC=10C7  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; HALT
+  ; halted: HALT
+listing_head_lines: 8
+expected_listing_head: |
+  0000  02001067  JMP   0x1067      ; reset vector
+
+  ; data segment
+  0010  00000000  DATA  0
+  0011  00000000  DATA  0
+  0012  00000000  DATA  0
+  0013  00000000  DATA  0
+  0014  00000000  DATA  0
