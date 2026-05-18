@@ -137,6 +137,7 @@ class Snapshot:
     ir: int
     tos: int
     ds_top: int
+    ds: tuple[int, ...]  # full data-stack snapshot for PICK at arbitrary depth
     rs_top: int
     a: int
     b: int
@@ -159,6 +160,7 @@ def _snapshot(dp: DataPath) -> Snapshot:
         ir=ir,
         tos=_signed_word(dp.tos),
         ds_top=dp.ds[-1] if dp.ds else 0,
+        ds=tuple(dp.ds),
         rs_top=dp.rs[-1] if dp.rs else 0,
         a=dp.a & ADDR_MASK,
         b=dp.b & ADDR_MASK,
@@ -312,6 +314,13 @@ class ControlUnit:
         if sel is Sel.TOS_FROM_IO:
             assert io_data is not None, "LATCH_TOS=IO without IO_READ in same tick"
             return io_data, False
+        if sel is Sel.TOS_FROM_DS_AT_DEPTH:
+            depth = snap.operand_unsigned
+            if depth == 0:
+                return snap.tos, False
+            if depth > len(snap.ds):
+                raise MachineError(f"PICK depth {depth} exceeds data stack size {len(snap.ds)}")
+            return snap.ds[-depth], False
         raise MachineError(f"bad TOS selector: {sel}")
 
     # ----- main tick --------------------------------------------------------

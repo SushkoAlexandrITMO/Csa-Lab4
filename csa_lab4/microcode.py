@@ -90,6 +90,8 @@ class Sel(Enum):
     TOS_FROM_DS_TOP = auto()
     TOS_FROM_DS_POP = auto()
     TOS_FROM_IO = auto()
+    # PICK reads DS at depth = IR.operand (depth 0 == TOS, 1 == DS top, ...).
+    TOS_FROM_DS_AT_DEPTH = auto()
 
     # DS push source
     DS_PUSH_TOS = auto()
@@ -190,6 +192,8 @@ M_STAI_1 = 42
 M_STAI_2 = 43
 M_STBI_1 = 44
 M_STBI_2 = 45
+
+M_PICK = 46
 
 
 def _mi(label: str, *signals: SignalSpec) -> MicroInstr:
@@ -477,6 +481,13 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_B, Sel.B_FROM_PLUS_ONE),
         _RET_FETCH,
     ),
+    # --- PICK (random access into the data stack by depth) ---
+    _mi(
+        "PICK",
+        (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_DS_AT_DEPTH),
+        _RET_FETCH,
+    ),
 )
 
 
@@ -515,4 +526,5 @@ DISPATCH: dict[Opcode, int] = {
     Opcode.LDBI: M_LDBI_1,
     Opcode.STAI: M_STAI_1,
     Opcode.STBI: M_STBI_1,
+    Opcode.PICK: M_PICK,
 }

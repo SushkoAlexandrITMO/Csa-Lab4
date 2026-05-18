@@ -51,6 +51,7 @@ class Opcode(IntEnum):
     DROP = 0x51
     SWAP = 0x52
     OVER = 0x53
+    PICK = 0x54  # push a copy of ds at depth = operand (depth 0 == DUP, 1 == OVER)
 
 
 HAS_OPERAND: frozenset[Opcode] = frozenset(
@@ -67,6 +68,7 @@ HAS_OPERAND: frozenset[Opcode] = frozenset(
         Opcode.PUSH,
         Opcode.LDA,
         Opcode.LDB,
+        Opcode.PICK,
     },
 )
 
