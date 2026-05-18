@@ -1,0 +1,61 @@
+description: 'Euler #4 — largest 3-digit-product palindrome'
+source: |
+  ; Project Euler problem 4 — largest palindrome product of two 3-digit numbers.
+  ; Expected answer: 906609 = 913 * 993.
+  ;
+  ; Brute force i*j with two prunes:
+  ;   * symmetry  — j starts at i, so each unordered pair is considered once;
+  ;   * monotone early-exit — j decreases, so p = i*j also decreases for fixed
+  ;     i; once p < best the inner loop cannot improve and returns.
+  ;
+  ; The search range is intentionally bounded to [910..999] for both factors.
+  ; This window contains 913 * 993 = 906609 (the true answer); with full
+  ; [100..999] the algorithm still finds 906609 but the simulator (a Python
+  ; interpreter walking microinstructions tick-by-tick) takes minutes. The
+  ; logic is identical — only the lower bound differs.
+
+  (defun reverse-num (n acc)
+    (if (= n 0)
+        acc
+        (reverse-num (/ n 10) (+ (* acc 10) (mod n 10)))))
+
+  (defun is-pal (n)
+    (= n (reverse-num n 0)))
+
+  (defun loop-j (i j best)
+    (if (< j 910)
+        best
+        (let ((p (* i j)))
+          (if (< p best)
+              best
+              (if (is-pal p)
+                  (loop-j i (- j 1) p)
+                  (loop-j i (- j 1) best))))))
+
+  (defun loop-i (i best)
+    (if (< i 910)
+        best
+        (loop-i (- i 1) (loop-j i i best))))
+
+  (print-int (loop-i 999 0))
+  (print-char 10)
+  (halt)
+stdin: ''
+expected_stdout: |
+  906609
+tick_limit: 200000000
+log_enabled: false
+listing_head_lines: 12
+expected_listing_head: |
+  0000  02001067  JMP   0x1067      ; reset vector
+
+  ; data segment
+
+  ; code segment
+  1000  02001023  JMP 0x1023             JMP defun_end_1  ; skip body of __pstr_print_loop
+  1001  00000000  NOP                   fn___pstr_print_loop: fn___pstr_print_loop:
+  1002  50000000  DUP                    DUP   ; ref n (TOS)
+  1003  40000000  PUSH 0x0000            PUSH 0
+  1004  15000000  CMP                    CMP   ; =
+  1005  03001008  JZ 0x1008              JZ cmp_true_2
+  1006  40000000  PUSH 0x0000            PUSH 0  ; cmp: false

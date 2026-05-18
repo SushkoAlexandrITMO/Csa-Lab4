@@ -1,0 +1,51 @@
+description: 'cat: echo until EOF'
+source: |
+  ; Echo input characters until the input buffer is exhausted, at which point
+  ; the simulator halts (per the stream variant: empty buffer => HaltError).
+  (defun cat ()
+    (progn
+      (print-char (read-char))
+      (cat)))
+  (cat)
+stdin: meow!
+expected_stdout: meow!
+tick_limit: 1000000
+log_enabled: true
+log_head_lines: 8
+expected_log_head: |
+  T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00002  m_PC=04 DECODE      PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; JMP 0x1067
+  T00003  m_PC=00 JMP         PC=1067  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00004  m_PC=01 FETCH       PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00005  m_PC=02 DECODE      PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; NOP
+  T00006  m_PC=00 NOP         PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00007  m_PC=01 FETCH       PC=1069  IR=02001070  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
+  T00008  m_PC=04 DECODE      PC=1069  IR=02001070  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; JMP 0x1070
+log_tail_lines: 4
+expected_log_tail: |
+  T00114  m_PC=00 NOP         PC=106A  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[6]  Z=0 N=0
+  T00115  m_PC=01 FETCH       PC=106B  IR=30000000  TOS=          0  A=0000 B=0000  DS[0]  RS[6]  Z=0 N=0
+  T00116  m_PC=29 DECODE      PC=106B  IR=30000000  TOS=          0  A=0000 B=0000  DS[0]  RS[6]  Z=0 N=0  ; INPUT 0x0000
+  ; halted: input buffer exhausted
+listing_head_lines: 20
+expected_listing_head: |
+  0000  02001067  JMP   0x1067      ; reset vector
+
+  ; data segment
+
+  ; code segment
+  1000  02001023  JMP 0x1023             JMP defun_end_1  ; skip body of __pstr_print_loop
+  1001  00000000  NOP                   fn___pstr_print_loop: fn___pstr_print_loop:
+  1002  50000000  DUP                    DUP   ; ref n (TOS)
+  1003  40000000  PUSH 0x0000            PUSH 0
+  1004  15000000  CMP                    CMP   ; =
+  1005  03001008  JZ 0x1008              JZ cmp_true_2
+  1006  40000000  PUSH 0x0000            PUSH 0  ; cmp: false
+  1007  0200100A  JMP 0x100A             JMP cmp_end_3
+  1008  00000000  NOP                   cmp_true_2: cmp_true_2:
+  1009  40000001  PUSH 0x0001            PUSH 1  ; cmp: true
+  100A  00000000  NOP                   cmp_end_3: cmp_end_3:
+  100B  40000000  PUSH 0x0000            PUSH 0  ; if-cond cmp
+  100C  15000000  CMP                    CMP   ; if-cond -> Z
+  100D  03001010  JZ 0x1010              JZ if_else_4
+  100E  40000000  PUSH 0x0000            PUSH 0

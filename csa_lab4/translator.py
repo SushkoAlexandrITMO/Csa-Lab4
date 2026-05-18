@@ -40,6 +40,36 @@ OPERAND_LIMIT_POS: int = (1 << (OPERAND_BITS - 1)) - 1
 OPERAND_LIMIT_NEG: int = -(1 << (OPERAND_BITS - 1))
 
 
+# Standard library, injected ahead of the user program. Implements the
+# pstr helpers in our lisp itself so the runtime cost is visible in the
+# journal and the report. Kept tiny — only what's required by the
+# specified golden tests.
+PRELUDE_SOURCE: str = """
+(defun __pstr_print_loop (ptr n)
+  (if (= n 0)
+      0
+      (progn
+        (print-char (load ptr))
+        (__pstr_print_loop (+ ptr 1) (- n 1)))))
+
+(defun __pstr_print (addr)
+  (__pstr_print_loop (+ addr 1) (load addr)))
+
+(defun __pstr_read_loop (ptr count)
+  (let ((c (read-char)))
+    (if (= c 10)
+        count
+        (progn
+          (store-at ptr c)
+          (__pstr_read_loop (+ ptr 1) (+ count 1))))))
+
+(defun __pstr_read (addr)
+  (progn
+    (store-at addr (__pstr_read_loop (+ addr 1) 0))
+    addr))
+"""
+
+
 class TranslationError(Exception):
     """Raised when the input program cannot be compiled."""
 
@@ -267,14 +297,24 @@ class Compiler:
 
     # --------------------------------------------------------------- compile
     def compile_program(self, program: list[Form]) -> None:
+        # Prelude is parsed every compilation — small, no need to cache.
+        prelude = parse(tokenize(PRELUDE_SOURCE))
+        all_forms = [*prelude, *program]
+
         # First pass: collect global variable definitions and function
         # declarations so forward references resolve.
-        for form in program:
+        for form in all_forms:
             self._collect_top_level(form)
 
-        # Second pass: compile.  Memory layout: the linker plants a synthesised
-        # ``JMP _start`` at address 0 (the reset vector), so the first emitted
-        # code item is the start of user code at ``code_base``.
+        # Second pass: compile prelude defuns (they each emit a JMP-over-body
+        # so execution falls straight through them at run time), then the
+        # user program starting at the ``_start`` label.
+        for form in prelude:
+            assert _is_call(form, "defun"), "prelude must contain only defuns"
+            self.compile_defun(form)  # type: ignore[arg-type]
+
+        # Memory layout: the linker plants a synthesised ``JMP _start`` at
+        # address 0 (the reset vector); ``_start`` is the entry into user code.
         self.attach_label("_start")
         for form in program:
             if _is_call(form, "defun"):
@@ -438,6 +478,18 @@ class Compiler:
             return
         if name == "store":
             self._compile_store(args)
+            return
+        if name == "store-at":
+            self._compile_store_at(args)
+            return
+        if name == "print-string":
+            self._compile_print_string(args)
+            return
+        if name == "read-string":
+            self._compile_read_string(args)
+            return
+        if name == "buffer-of":
+            self._compile_buffer_of(args)
             return
         if name in self.functions:
             self._compile_call(name, args)
@@ -623,7 +675,55 @@ class Compiler:
             self.emit(Opcode.STORE, args[0], source=f"STORE 0x{args[0]:04X}")
             self.pop_slot()
             return
-        raise TranslationError("(store <dynamic addr> value) not yet supported")
+        raise TranslationError("(store <dynamic addr> value) — use (store-at addr value)")
+
+    def _compile_store_at(self, args: list[Form]) -> None:
+        # (store-at addr value): write value to memory[addr] where addr is a
+        # runtime value. Expression result is the stored value (mirroring setq).
+        if len(args) != 2:
+            raise TranslationError("(store-at addr value) takes 2 args")
+        self.compile_expr(args[1])  # value on top
+        self.emit(Opcode.DUP, source="DUP   ; keep value as expr result")
+        self.push_slot()
+        self.compile_expr(args[0])  # addr on top
+        self.emit(Opcode.STOREI, source="STOREI ; (store-at ...)")
+        # STOREI pops addr (TOS) and value (NOS); commit leaves one value
+        # below (our retained copy from the first DUP) on top.
+        self.pop_slot()
+        self.pop_slot()
+
+    def _compile_print_string(self, args: list[Form]) -> None:
+        if len(args) != 1:
+            raise TranslationError("(print-string s) takes 1 arg")
+        self.compile_expr(args[0])  # pstr address on TOS
+        self.emit(
+            Opcode.CALL,
+            operand_label="fn___pstr_print",
+            source="CALL __pstr_print",
+        )
+        # CALL pops args, pushes one return — net 0 slot change.
+
+    def _compile_read_string(self, args: list[Form]) -> None:
+        if len(args) != 1:
+            raise TranslationError("(read-string buf-addr) takes 1 arg")
+        self.compile_expr(args[0])
+        self.emit(
+            Opcode.CALL,
+            operand_label="fn___pstr_read",
+            source="CALL __pstr_read",
+        )
+
+    def _compile_buffer_of(self, args: list[Form]) -> None:
+        # (buffer-of N) — reserve N consecutive data words and push the start
+        # address. Used to allocate pstr buffers for read-string / sort.
+        if len(args) != 1 or not isinstance(args[0], int):
+            raise TranslationError("(buffer-of N) needs a literal positive integer")
+        size = args[0]
+        if size <= 0:
+            raise TranslationError("(buffer-of N): size must be positive")
+        start = DATA_SEGMENT_START + len(self.data)
+        self.data.extend([0] * size)
+        self.compile_int_literal(start)
 
     def _compile_call(self, name: str, args: list[Form]) -> None:
         label = self.functions[name]

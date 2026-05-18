@@ -15,6 +15,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from csa_lab4.isa import OPERAND_BITS, OPERAND_MASK, WORD_BITS, WORD_MASK, Opcode, decode, mnemonic
 from csa_lab4.microcode import DISPATCH, M_FETCH, MPROGRAM, Sel, Signal
@@ -127,9 +128,8 @@ class DataPath:
         return cls(memory=memory)
 
 
-@dataclass(frozen=True)
-class Snapshot:
-    """Sampled DataPath state at the start of a tick."""
+class Snapshot(NamedTuple):
+    """Sampled DataPath state at the start of a tick (hot path — NamedTuple)."""
 
     pc: int
     ar: int
@@ -137,7 +137,6 @@ class Snapshot:
     ir: int
     tos: int
     ds_top: int
-    ds: tuple[int, ...]  # full data-stack snapshot for PICK at arbitrary depth
     rs_top: int
     a: int
     b: int
@@ -160,7 +159,6 @@ def _snapshot(dp: DataPath) -> Snapshot:
         ir=ir,
         tos=_signed_word(dp.tos),
         ds_top=dp.ds[-1] if dp.ds else 0,
-        ds=tuple(dp.ds),
         rs_top=dp.rs[-1] if dp.rs else 0,
         a=dp.a & ADDR_MASK,
         b=dp.b & ADDR_MASK,
@@ -180,12 +178,13 @@ def _snapshot(dp: DataPath) -> Snapshot:
 
 
 class ControlUnit:
-    def __init__(self, data_path: DataPath, io: IO) -> None:
+    def __init__(self, data_path: DataPath, io: IO, *, log_enabled: bool = True) -> None:
         self.data_path = data_path
         self.io = io
         self.m_pc: int = M_FETCH
         self.tick_count: int = 0
         self.halted: bool = False
+        self.log_enabled: bool = log_enabled
         self.log_lines: list[str] = []
 
     # ----- ALU --------------------------------------------------------------
@@ -290,14 +289,19 @@ class ControlUnit:
             return DISPATCH[opcode]
         raise MachineError(f"bad m_PC selector: {sel}")
 
-    @staticmethod
     def _tos_source(
+        self,
         sel: Sel | None,
         snap: Snapshot,
         alu_result: int | None,
         io_data: int | None,
     ) -> tuple[int, bool]:
-        """Return (new TOS, did-pop-ds flag)."""
+        """Return (new TOS, did-pop-ds flag).
+
+        Reads from ``self.data_path.ds`` directly for the PICK selector.  All
+        DS mutations are deferred to the commit phase later in the same tick,
+        so this read still sees the start-of-tick stack.
+        """
         if sel is Sel.TOS_FROM_ALU:
             assert alu_result is not None, "LATCH_TOS=ALU without ALU_OP in same tick"
             return alu_result, False
@@ -318,9 +322,10 @@ class ControlUnit:
             depth = snap.operand_unsigned
             if depth == 0:
                 return snap.tos, False
-            if depth > len(snap.ds):
-                raise MachineError(f"PICK depth {depth} exceeds data stack size {len(snap.ds)}")
-            return snap.ds[-depth], False
+            ds = self.data_path.ds
+            if depth > len(ds):
+                raise MachineError(f"PICK depth {depth} exceeds data stack size {len(ds)}")
+            return ds[-depth], False
         raise MachineError(f"bad TOS selector: {sel}")
 
     # ----- main tick --------------------------------------------------------
@@ -442,7 +447,8 @@ class ControlUnit:
 
         self.m_pc = next_m_pc
         self.tick_count += 1
-        self._log_tick(micro, snap)
+        if self.log_enabled:
+            self._log_tick(micro, snap)
 
         if halt:
             self.halted = True
@@ -491,6 +497,8 @@ def simulate(
     stdin_data: str,
     tick_limit: int,
     tick_hook: TickHook | None = None,
+    *,
+    log_enabled: bool = True,
 ) -> tuple[str, str]:
     """Run the simulator.
 
@@ -504,7 +512,7 @@ def simulate(
     image = load_binary(binary)
     dp = DataPath.from_image(image)
     io = IO(input_buffer=[ord(c) for c in stdin_data])
-    cu = ControlUnit(dp, io)
+    cu = ControlUnit(dp, io, log_enabled=log_enabled)
 
     halt_reason = ""
     try:
