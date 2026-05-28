@@ -30,7 +30,15 @@ def test_every_microinstruction_advances_m_pc() -> None:
 
 
 def test_signal_selectors_are_consistent() -> None:
-    no_sel_signals = {Signal.LATCH_IR, Signal.LATCH_FLAGS, Signal.MEM_READ, Signal.DS_POP, Signal.RS_POP, Signal.HALT}
+    no_sel_signals = {
+        Signal.LATCH_IR,
+        Signal.LATCH_FLAGS,
+        Signal.LATCH_CARRY,
+        Signal.MEM_READ,
+        Signal.DS_POP,
+        Signal.RS_POP,
+        Signal.HALT,
+    }
     for index, mi in enumerate(MPROGRAM):
         for signal, selector in mi.signals:
             if signal in no_sel_signals:

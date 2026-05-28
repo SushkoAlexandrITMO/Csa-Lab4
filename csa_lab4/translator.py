@@ -229,12 +229,18 @@ PRIMITIVE_BINARY: dict[str, Opcode] = {
     "*": Opcode.MUL,
     "/": Opcode.DIV,
     "mod": Opcode.MOD,
+    "bitand": Opcode.AND,
+    "bitor": Opcode.OR,
+    "bitxor": Opcode.XOR,
+    "adc": Opcode.ADC,  # add with carry; relies on a preceding +/adc/- setting C
+    "sbb": Opcode.SBB,  # subtract with borrow
 }
 
 PRIMITIVE_UNARY: dict[str, Opcode] = {
     "neg": Opcode.NEG,
     "1+": Opcode.INC,
     "1-": Opcode.DEC,
+    "bitnot": Opcode.NOT,
 }
 
 COMPARISONS: dict[str, Opcode] = {
@@ -491,6 +497,12 @@ class Compiler:
         if name == "buffer-of":
             self._compile_buffer_of(args)
             return
+        if name in {"set-a", "set-b"}:
+            self._compile_set_ab(name, args)
+            return
+        if name in {"get-a", "get-b"}:
+            self._compile_get_ab(name, args)
+            return
         if name in self.functions:
             self._compile_call(name, args)
             return
@@ -712,6 +724,25 @@ class Compiler:
             operand_label="fn___pstr_read",
             source="CALL __pstr_read",
         )
+
+    def _compile_set_ab(self, name: str, args: list[Form]) -> None:
+        # (set-a v) / (set-b v): load address register from a runtime value;
+        # expression result is the value itself (DUP before MVAT consumes one).
+        if len(args) != 1:
+            raise TranslationError(f"({name} v) takes 1 arg")
+        self.compile_expr(args[0])
+        self.emit(Opcode.DUP, source="DUP   ; keep value as expr result")
+        self.push_slot()
+        op = Opcode.MVAT if name == "set-a" else Opcode.MVBT
+        self.emit(op, source=f"{op.name}  ; {name}")
+        self.pop_slot()
+
+    def _compile_get_ab(self, name: str, args: list[Form]) -> None:
+        if args:
+            raise TranslationError(f"({name}) takes no args")
+        op = Opcode.PSHA if name == "get-a" else Opcode.PSHB
+        self.emit(op, source=f"{op.name}  ; {name}")
+        self.push_slot()
 
     def _compile_buffer_of(self, args: list[Form]) -> None:
         # (buffer-of N) — reserve N consecutive data words and push the start

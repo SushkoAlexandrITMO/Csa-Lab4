@@ -331,6 +331,180 @@ def test_halt_error_is_subclass() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Bitwise operations.
+# ---------------------------------------------------------------------------
+
+
+def test_bitwise_and() -> None:
+    image = _image(
+        Instr(Opcode.PUSH, 0b1100),
+        Instr(Opcode.PUSH, 0b1010),
+        Instr(Opcode.AND),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == str(0b1000)
+
+
+def test_bitwise_or() -> None:
+    image = _image(
+        Instr(Opcode.PUSH, 0b1100),
+        Instr(Opcode.PUSH, 0b1010),
+        Instr(Opcode.OR),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == str(0b1110)
+
+
+def test_bitwise_xor() -> None:
+    image = _image(
+        Instr(Opcode.PUSH, 0b1100),
+        Instr(Opcode.PUSH, 0b1010),
+        Instr(Opcode.XOR),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == str(0b0110)
+
+
+def test_bitwise_not() -> None:
+    # ~0 = -1 in two's complement
+    image = _image(
+        Instr(Opcode.PUSH, 0),
+        Instr(Opcode.NOT),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == "-1"
+
+
+def test_bitand_parity_check() -> None:
+    # 41 & 1 = 1 (odd)
+    image = _image(
+        Instr(Opcode.PUSH, 41),
+        Instr(Opcode.PUSH, 1),
+        Instr(Opcode.AND),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == "1"
+
+
+# ---------------------------------------------------------------------------
+# Carry flag, ADC and SBB (double precision building blocks).
+# ---------------------------------------------------------------------------
+
+
+def test_add_sets_carry_and_adc_consumes_it() -> None:
+    # low: 3_000_000_000 + 2_000_000_000 overflows 32-bit unsigned -> carry.
+    # high: 1 + 2 + carry(1) = 4. Big constants are placed in data and LOADed.
+    words: list[int] = [
+        encode(Instr(Opcode.LOAD, 0x100)),  # alo
+        encode(Instr(Opcode.LOAD, 0x101)),  # blo
+        encode(Instr(Opcode.ADD)),  # lo sum, sets C
+        encode(Instr(Opcode.OUTPUT, 2)),  # print lo
+        encode(Instr(Opcode.PUSH, 1)),  # ahi
+        encode(Instr(Opcode.PUSH, 2)),  # bhi
+        encode(Instr(Opcode.ADC)),  # hi + carry
+        encode(Instr(Opcode.OUTPUT, 2)),  # print hi
+        encode(Instr(Opcode.HALT)),
+    ]
+    words += [0] * (0x100 - len(words))
+    words.append(3_000_000_000)
+    words.append(2_000_000_000)
+    image = assemble_image(words)
+    stdout, _ = _run(image)
+    # lo = (3e9 + 2e9) mod 2^32 = 705032704 ; hi = 4
+    assert stdout == "7050327044"  # "705032704" + "4"
+
+
+def test_sub_sets_borrow_and_sbb_consumes_it() -> None:
+    # low: 1 - 2 borrows (unsigned) -> C=1 ; high: 5 - 1 - 1 = 3
+    words: list[int] = [
+        encode(Instr(Opcode.PUSH, 1)),  # alo
+        encode(Instr(Opcode.PUSH, 2)),  # blo
+        encode(Instr(Opcode.SUB)),  # 1 - 2 = -1, borrow set
+        encode(Instr(Opcode.DROP)),  # discard low result
+        encode(Instr(Opcode.PUSH, 5)),  # ahi
+        encode(Instr(Opcode.PUSH, 1)),  # bhi
+        encode(Instr(Opcode.SBB)),  # 5 - 1 - borrow(1) = 3
+        encode(Instr(Opcode.OUTPUT, 2)),
+        encode(Instr(Opcode.HALT)),
+    ]
+    image = assemble_image(words)
+    stdout, _ = _run(image)
+    assert stdout == "3"
+
+
+def test_carry_flag_shown_in_log() -> None:
+    image = _image(
+        Instr(Opcode.PUSH, 1),
+        Instr(Opcode.PUSH, 1),
+        Instr(Opcode.ADD),
+        Instr(Opcode.HALT),
+    )
+    _, log = _run(image)
+    assert "C=0" in log  # 1+1 does not overflow -> carry stays 0
+
+
+# ---------------------------------------------------------------------------
+# A / B register moves (MVAT/MVBT/PSHA/PSHB).
+# ---------------------------------------------------------------------------
+
+
+def test_mvat_psha_round_trip() -> None:
+    # Set A from a runtime value, then read it back onto the stack.
+    image = _image(
+        Instr(Opcode.PUSH, 1234),
+        Instr(Opcode.MVAT),  # A <- 1234 (pops)
+        Instr(Opcode.PSHA),  # push A
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == "1234"
+
+
+def test_mvbt_pshb_round_trip() -> None:
+    image = _image(
+        Instr(Opcode.PUSH, 777),
+        Instr(Opcode.MVBT),
+        Instr(Opcode.PSHB),
+        Instr(Opcode.OUTPUT, 2),
+        Instr(Opcode.HALT),
+    )
+    stdout, _ = _run(image)
+    assert stdout == "777"
+
+
+def test_mvat_then_post_increment_walk() -> None:
+    # Set A to a buffer base from a runtime value, then walk it with LDAI.
+    # data at 0x80..0x82 = 10, 20, 30
+    words: list[int] = [
+        encode(Instr(Opcode.PUSH, 0x80)),
+        encode(Instr(Opcode.MVAT)),  # A <- 0x80
+        encode(Instr(Opcode.LDAI)),  # push MEM[0x80]=10; A=0x81
+        encode(Instr(Opcode.OUTPUT, 2)),
+        encode(Instr(Opcode.LDAI)),  # push MEM[0x81]=20; A=0x82
+        encode(Instr(Opcode.OUTPUT, 2)),
+        encode(Instr(Opcode.LDAI)),  # push MEM[0x82]=30; A=0x83
+        encode(Instr(Opcode.OUTPUT, 2)),
+        encode(Instr(Opcode.HALT)),
+    ]
+    words += [0] * (0x80 - len(words))
+    words += [10, 20, 30]
+    image = assemble_image(words)
+    stdout, _ = _run(image)
+    assert stdout == "102030"
+
+
+# ---------------------------------------------------------------------------
 # Address registers A / B with post-increment indirection.
 # ---------------------------------------------------------------------------
 

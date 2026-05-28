@@ -117,6 +117,7 @@ class DataPath:
     b: int = 0  # auxiliary address register B (16-bit pointer)
     flag_z: bool = False
     flag_n: bool = False
+    flag_c: bool = False  # carry/borrow from ADD/SUB/ADC/SBB
 
     @classmethod
     def from_image(cls, words: list[int]) -> DataPath:
@@ -142,6 +143,7 @@ class Snapshot(NamedTuple):
     b: int
     flag_z: bool
     flag_n: bool
+    flag_c: bool
     operand_unsigned: int
     operand_signed: int
     opcode_raw: int
@@ -164,6 +166,7 @@ def _snapshot(dp: DataPath) -> Snapshot:
         b=dp.b & ADDR_MASK,
         flag_z=dp.flag_z,
         flag_n=dp.flag_n,
+        flag_c=dp.flag_c,
         operand_unsigned=operand_raw,
         operand_signed=_signed_operand(operand_raw),
         opcode_raw=(ir >> 24) & 0xFF,
@@ -190,15 +193,31 @@ class ControlUnit:
     # ----- ALU --------------------------------------------------------------
 
     @staticmethod
-    def _alu(sel: Sel | None, snap: Snapshot) -> int:
+    def _alu(sel: Sel | None, snap: Snapshot) -> tuple[int, bool]:
+        """Return (signed 32-bit result, carry/borrow out).
+
+        Carry is only meaningful for ADD/SUB/ADC/SBB; for every other op it
+        is returned as ``False`` and never latched (no LATCH_CARRY signal).
+        """
         a = snap.tos
         b = snap.ds_top
+        au = a & WORD_MASK
+        bu = b & WORD_MASK
+        carry_in = 1 if snap.flag_c else 0
         if sel is Sel.ALU_ADD:
-            return _signed_word(b + a)
+            full = bu + au
+            return _signed_word(full), full > WORD_MASK
+        if sel is Sel.ALU_ADC:
+            full = bu + au + carry_in
+            return _signed_word(full), full > WORD_MASK
         if sel is Sel.ALU_SUB:
-            return _signed_word(b - a)
+            full = bu - au
+            return _signed_word(b - a), full < 0
+        if sel is Sel.ALU_SBB:
+            full = bu - au - carry_in
+            return _signed_word(b - a - carry_in), full < 0
         if sel is Sel.ALU_MUL:
-            return _signed_word(b * a)
+            return _signed_word(b * a), False
         if sel is Sel.ALU_DIV:
             if a == 0:
                 raise MachineError("division by zero")
@@ -206,20 +225,28 @@ class ControlUnit:
             q = abs(b) // abs(a)
             if (a < 0) ^ (b < 0):
                 q = -q
-            return _signed_word(q)
+            return _signed_word(q), False
         if sel is Sel.ALU_MOD:
             if a == 0:
                 raise MachineError("modulo by zero")
             q = abs(b) // abs(a)
             if (a < 0) ^ (b < 0):
                 q = -q
-            return _signed_word(b - q * a)
+            return _signed_word(b - q * a), False
         if sel is Sel.ALU_NEG:
-            return _signed_word(-a)
+            return _signed_word(-a), False
         if sel is Sel.ALU_INC:
-            return _signed_word(a + 1)
+            return _signed_word(a + 1), False
         if sel is Sel.ALU_DEC:
-            return _signed_word(a - 1)
+            return _signed_word(a - 1), False
+        if sel is Sel.ALU_AND:
+            return _signed_word(bu & au), False
+        if sel is Sel.ALU_OR:
+            return _signed_word(bu | au), False
+        if sel is Sel.ALU_XOR:
+            return _signed_word(bu ^ au), False
+        if sel is Sel.ALU_NOT:
+            return _signed_word(~au), False
         raise MachineError(f"bad ALU op selector: {sel}")
 
     # ----- source selectors -------------------------------------------------
@@ -260,6 +287,8 @@ class ControlUnit:
             return snap.operand_unsigned & ADDR_MASK
         if sel is Sel.A_FROM_PLUS_ONE:
             return (snap.a + 1) & ADDR_MASK
+        if sel is Sel.A_FROM_TOS:
+            return snap.tos & ADDR_MASK
         raise MachineError(f"bad A selector: {sel}")
 
     @staticmethod
@@ -268,6 +297,8 @@ class ControlUnit:
             return snap.operand_unsigned & ADDR_MASK
         if sel is Sel.B_FROM_PLUS_ONE:
             return (snap.b + 1) & ADDR_MASK
+        if sel is Sel.B_FROM_TOS:
+            return snap.tos & ADDR_MASK
         raise MachineError(f"bad B selector: {sel}")
 
     @staticmethod
@@ -318,6 +349,10 @@ class ControlUnit:
         if sel is Sel.TOS_FROM_IO:
             assert io_data is not None, "LATCH_TOS=IO without IO_READ in same tick"
             return io_data, False
+        if sel is Sel.TOS_FROM_A:
+            return snap.a, False
+        if sel is Sel.TOS_FROM_B:
+            return snap.b, False
         if sel is Sel.TOS_FROM_DS_AT_DEPTH:
             depth = snap.operand_unsigned
             if depth == 0:
@@ -339,11 +374,12 @@ class ControlUnit:
 
         # Phase A: evaluate combinatorial outputs.
         alu_result: int | None = None
+        alu_carry: bool = False
         io_data: int | None = None
         io_consume_port: int | None = None
         for sig, sel in micro.signals:
             if sig is Signal.ALU_OP:
-                alu_result = self._alu(sel, snap)
+                alu_result, alu_carry = self._alu(sel, snap)
             elif sig is Signal.IO_READ:
                 io_data = self.io.peek(snap.operand_unsigned & 0xFF)
                 io_consume_port = snap.operand_unsigned & 0xFF
@@ -358,6 +394,7 @@ class ControlUnit:
         next_b = snap.b
         next_z = snap.flag_z
         next_n = snap.flag_n
+        next_c = snap.flag_c
         next_m_pc = self.m_pc
 
         ds_push = False
@@ -386,6 +423,8 @@ class ControlUnit:
                 assert alu_result is not None, "LATCH_FLAGS without ALU_OP in same tick"
                 next_z = alu_result == 0
                 next_n = alu_result < 0
+            elif sig is Signal.LATCH_CARRY:
+                next_c = alu_carry
             elif sig is Signal.LATCH_M_PC:
                 next_m_pc = self._next_m_pc(sel, snap, self.m_pc)
             elif sig is Signal.LATCH_A:
@@ -421,6 +460,7 @@ class ControlUnit:
         self.data_path.b = next_b & ADDR_MASK
         self.data_path.flag_z = next_z
         self.data_path.flag_n = next_n
+        self.data_path.flag_c = next_c
 
         if ds_push:
             self.data_path.ds.append(snap.tos)
@@ -472,7 +512,7 @@ class ControlUnit:
             f"PC={dp.pc:04X}  IR={dp.ir & WORD_MASK:08X}  "
             f"TOS={dp.tos:>11d}  A={dp.a:04X} B={dp.b:04X}  "
             f"DS[{len(dp.ds)}]  RS[{len(dp.rs)}]  "
-            f"Z={int(dp.flag_z)} N={int(dp.flag_n)}"
+            f"Z={int(dp.flag_z)} N={int(dp.flag_n)} C={int(dp.flag_c)}"
             f"{annotation}"
         )
         self.log_lines.append(line)

@@ -201,3 +201,62 @@ def test_string_literal_placed_in_data_segment() -> None:
 def test_load_explicit_address() -> None:
     src = "(setq x 99) (print-int (load 16))"  # 16 = DATA_SEGMENT_START
     assert _run(src) == "99"
+
+
+# ---------------------------------------------------------------------------
+# Bitwise primitives.
+# ---------------------------------------------------------------------------
+
+
+def test_bitand() -> None:
+    assert _run("(print-int (bitand 12 10))") == "8"
+
+
+def test_bitor() -> None:
+    assert _run("(print-int (bitor 12 10))") == "14"
+
+
+def test_bitxor() -> None:
+    assert _run("(print-int (bitxor 12 10))") == "6"
+
+
+def test_bitnot() -> None:
+    assert _run("(print-int (bitnot 0))") == "-1"
+
+
+def test_bitand_even_odd() -> None:
+    assert _run("(print-int (if (= (bitand 7 1) 0) 100 200))") == "200"
+    assert _run("(print-int (if (= (bitand 8 1) 0) 100 200))") == "100"
+
+
+# ---------------------------------------------------------------------------
+# A / B register access from lisp.
+# ---------------------------------------------------------------------------
+
+
+def test_set_a_get_a() -> None:
+    assert _run("(set-a 55) (print-int (get-a))") == "55"
+
+
+def test_set_b_get_b() -> None:
+    assert _run("(set-b 66) (print-int (get-b))") == "66"
+
+
+def test_set_a_returns_value() -> None:
+    assert _run("(print-int (set-a 99))") == "99"
+
+
+# ---------------------------------------------------------------------------
+# Carry-aware arithmetic from lisp (used by the double_precision golden test).
+# ---------------------------------------------------------------------------
+
+
+def test_adc_propagates_carry_from_preceding_add() -> None:
+    src = """
+    (setq alo 3000000000)
+    (setq blo 2000000000)
+    (setq lo (+ alo blo))
+    (setq hi (adc 1 2))
+    (print-int hi)
+    """
+    assert _run(src) == "4"

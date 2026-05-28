@@ -76,10 +76,13 @@ Lisp-диалект с обязательной поддержкой рекур�
 
 <special>     ::= "defun" | "setq" | "if" | "progn" | "let"
                 | "+" | "-" | "*" | "/" | "mod" | "neg" | "1+" | "1-"
+                | "adc" | "sbb"                       ; арифметика с переносом
+                | "bitand" | "bitor" | "bitxor" | "bitnot"
                 | "=" | "<" | ">"
                 | "print-int" | "print-char" | "read-char" | "halt"
                 | "print-string" | "read-string"
                 | "load" | "store" | "store-at" | "buffer-of"
+                | "set-a" | "set-b" | "get-a" | "get-b"
 
 <defun>       ::= "(" "defun" <symbol> "(" <symbol>* ")" <form>+ ")"
 <setq>        ::= "(" "setq" <symbol> <form> ")"
@@ -128,7 +131,7 @@ Lisp-диалект с обязательной поддержкой рекур�
 | AR | 16 бит | Адрес для обращения к памяти |
 | DR | 32 бита | Данные из памяти / в память |
 | IR | 32 бита | Текущая инструкция |
-| Z, N | 1 бит | Флаги: Z = (результат == 0), N = (результат < 0) |
+| Z, N, C | 1 бит | Флаги: Z = (результат == 0), N = (результат < 0), C = перенос/заём из `ADD/SUB/ADC/SBB` |
 | mPC | 6 бит | Счётчик микроинструкций (внутренний для ControlUnit) |
 
 A/B — **только адресные**, в ALU не участвуют. Это сохраняет stack-контракт варианта: арифметика — на DS/TOS.
@@ -211,6 +214,12 @@ A/B — **только адресные**, в ALU не участвуют. Эт�
 | 0x16 | `NEG` | — | 3 | TOS ← -TOS; flags |
 | 0x17 | `INC` | — | 3 | TOS ← TOS+1; flags |
 | 0x18 | `DEC` | — | 3 | TOS ← TOS-1; flags |
+| 0x19 | `AND` | — | 3 | TOS ← NOS&TOS; pop NOS; flags |
+| 0x1A | `OR` | — | 3 | TOS ← NOS\|TOS; pop NOS; flags |
+| 0x1B | `XOR` | — | 3 | TOS ← NOS^TOS; pop NOS; flags |
+| 0x1C | `NOT` | — | 3 | TOS ← ~TOS; flags |
+| 0x1D | `ADC` | — | 3 | TOS ← NOS+TOS+C; pop NOS; set C, flags |
+| 0x1E | `SBB` | — | 3 | TOS ← NOS-TOS-C; pop NOS; set C, flags |
 | 0x20 | `LOAD` | addr | 4 | push TOS; TOS ← MEM[addr] |
 | 0x21 | `STORE` | addr | 4 | MEM[addr] ← TOS; TOS ← pop NOS |
 | 0x22 | `LOADI` | — | 4 | TOS ← MEM[TOS] (адрес — TOS, не push) |
@@ -221,6 +230,10 @@ A/B — **только адресные**, в ALU не участвуют. Эт�
 | 0x27 | `LDBI` | — | 4 | push TOS; TOS ← MEM[B]; B ← B+1 |
 | 0x28 | `STAI` | — | 4 | MEM[A] ← TOS; TOS ← pop NOS; A ← A+1 |
 | 0x29 | `STBI` | — | 4 | MEM[B] ← TOS; TOS ← pop NOS; B ← B+1 |
+| 0x2A | `MVAT` | — | 3 | A ← TOS; pop |
+| 0x2B | `MVBT` | — | 3 | B ← TOS; pop |
+| 0x2C | `PSHA` | — | 3 | push TOS; TOS ← A |
+| 0x2D | `PSHB` | — | 3 | push TOS; TOS ← B |
 | 0x30 | `INPUT` | port | 3 | push TOS; TOS ← порт[operand] |
 | 0x31 | `OUTPUT` | port | 3 | порт[operand] ← TOS; TOS ← pop |
 | 0x40 | `PUSH` | imm | 3 | push TOS; TOS ← знак-расширенный operand |
@@ -230,7 +243,9 @@ A/B — **только адресные**, в ALU не участвуют. Эт�
 | 0x53 | `OVER` | — | 3 | push TOS; TOS ← старая NOS |
 | 0x54 | `PICK` | depth | 3 | push TOS; TOS ← DS[-depth] |
 
-35 опкодов; полная таблица в `csa_lab4/isa.py`.
+45 опкодов; полная таблица в `csa_lab4/isa.py`.
+
+`AND/OR/XOR/NOT` — побитовые операции. `ADC/SBB` — арифметика с переносом: `C` устанавливается каждой из `ADD/SUB/ADC/SBB` и не изменяется остальными командами, что позволяет строить цепочки многословной арифметики. `MVAT/MVBT/PSHA/PSHB` дают доступ к адресным регистрам A/B со стека (установить из вычисленного значения и прочитать обратно), не нарушая stack-контракт: в ALU A/B по-прежнему не участвуют.
 
 ### Кодирование
 
@@ -360,7 +375,7 @@ DS и RS — стеки на регистрах общего назначени�
 
 ## Микропрограмма
 
-ROM микрокода — массив из 47 `MicroInstr`'ов (`csa_lab4/microcode.py`). Каждая запись — кортеж пар `(Signal, Sel)`, описывающих параллельно активные сигналы за один такт.
+ROM микрокода — массив из 57 `MicroInstr`'ов (`csa_lab4/microcode.py`). Каждая запись — кортеж пар `(Signal, Sel)`, описывающих параллельно активные сигналы за один такт.
 
 Карта ROM (адреса в скобках — стартовые точки handler'ов):
 
@@ -391,6 +406,11 @@ ROM микрокода — массив из 47 `MicroInstr`'ов (`csa_lab4/mic
  42-43: STAI.{1,2}
  44-45: STBI.{1,2}
  46:   PICK
+ 47-49: AND/OR/XOR
+ 50:   NOT
+ 51-52: ADC/SBB        -- также защёлкивают флаг C
+ 53-54: MVAT/MVBT
+ 55-56: PSHA/PSHB
 ```
 
 Полный пример микрокода для ADD:
@@ -445,7 +465,7 @@ pytest -q
 | cat | `tests/golden/cat.yml` | посимвольный I/O loop, останов по EOF |
 | hello_user_name | `tests/golden/hello_user_name.yml` | приветствие с прочитанным именем |
 | sort | `tests/golden/sort.yml` | bubble-sort массива чисел в pstr-формате |
-| double_precision | `tests/golden/double_precision.yml` | 62-битное сложение через две 31-битные половинки |
+| double_precision | `tests/golden/double_precision.yml` | 64-битное сложение через флаг переноса C и инструкцию ADC |
 | prob1 | `tests/golden/prob1.yml` | Project Euler #4 (906609 = 913×993) |
 
 Формат golden-теста (YAML): описание, исходник `.lisp`, stdin, ожидаемый stdout, лимит тактов, опционально — голова/хвост журнала и шапка листинга. См. `tests/golden/test_golden.py` для логики проверки.
@@ -453,7 +473,7 @@ pytest -q
 ### Пример журнала (фрагмент `hello`)
 
 ```
-T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=0  A=0000 B=0000  DS[0] RS[0] Z=0 N=0
+T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=0  A=0000 B=0000  DS[0] RS[0] Z=0 N=0 C=0
 T00002  m_PC=04 DECODE      PC=0001  IR=02001067  ...  ; JMP 0x1067
 T00003  m_PC=00 JMP         PC=1067  IR=02001067  ...
 ...
@@ -461,7 +481,7 @@ T01344  m_PC=03 HALT        PC=1070  IR=01000000  ...  ; HALT
 ; halted: HALT
 ```
 
-Каждая строка — один такт. Mnemonic появляется в комментарии на такте DECODE.
+Каждая строка — один такт. Mnemonic появляется в комментарии на такте DECODE. Флаги Z/N/C отражают состояние после такта.
 
 ## CI
 
@@ -488,6 +508,6 @@ T01344  m_PC=03 HALT        PC=1070  IR=01000000  ...  ; HALT
 
 ---
 
-## Контакт с пользователем
+## Расширение F32a
 
-Если вам нужно расширение варианта — например, добавить набор F32a (`MVAT`/`MVBT`/`AND`/`OR`/`XOR`/`NOT`/`ADC`) — изменения помещаются в `isa.py`, `microcode.py`, `machine.py` без переписывания транслятора: новые опкоды доступны через специальные формы lisp (как `print-char`/`load`).
+По мотивам учебного процессора F32a в ISA добавлены: побитовые `AND/OR/XOR/NOT`, арифметика с переносом `ADC/SBB` + флаг `C`, и перемещения адресных регистров `MVAT/MVBT/PSHA/PSHB`. В lisp они доступны как формы `bitand/bitor/bitxor/bitnot`, `adc/sbb`, `set-a/set-b/get-a/get-b`. Флаг `C` устанавливается операциями `ADD/SUB/ADC/SBB` и сохраняется прочими командами — это даёт корректные цепочки многословной арифметики (см. `examples/double_precision.lisp`, где 64-битное сложение строится из `+` и `adc`).

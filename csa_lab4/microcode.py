@@ -32,6 +32,7 @@ class Signal(Enum):
     LATCH_IR = auto()
     LATCH_TOS = auto()
     LATCH_FLAGS = auto()
+    LATCH_CARRY = auto()
     LATCH_M_PC = auto()
     LATCH_A = auto()
     LATCH_B = auto()
@@ -75,8 +76,10 @@ class Sel(Enum):
     # A / B sources
     A_FROM_OPERAND = auto()
     A_FROM_PLUS_ONE = auto()
+    A_FROM_TOS = auto()
     B_FROM_OPERAND = auto()
     B_FROM_PLUS_ONE = auto()
+    B_FROM_TOS = auto()
 
     # DR sources
     DR_FROM_MEM = auto()
@@ -90,6 +93,8 @@ class Sel(Enum):
     TOS_FROM_DS_TOP = auto()
     TOS_FROM_DS_POP = auto()
     TOS_FROM_IO = auto()
+    TOS_FROM_A = auto()
+    TOS_FROM_B = auto()
     # PICK reads DS at depth = IR.operand (depth 0 == TOS, 1 == DS top, ...).
     TOS_FROM_DS_AT_DEPTH = auto()
 
@@ -119,6 +124,12 @@ class Sel(Enum):
     ALU_NEG = auto()
     ALU_INC = auto()
     ALU_DEC = auto()
+    ALU_AND = auto()
+    ALU_OR = auto()
+    ALU_XOR = auto()
+    ALU_NOT = auto()
+    ALU_ADC = auto()
+    ALU_SBB = auto()
 
     # Micro-PC next state
     M_PC_PLUS_ONE = auto()
@@ -195,6 +206,17 @@ M_STBI_2 = 45
 
 M_PICK = 46
 
+M_AND = 47
+M_OR = 48
+M_XOR = 49
+M_NOT = 50
+M_ADC = 51
+M_SBB = 52
+M_MVAT = 53
+M_MVBT = 54
+M_PSHA = 55
+M_PSHB = 56
+
 
 def _mi(label: str, *signals: SignalSpec) -> MicroInstr:
     return MicroInstr(signals=tuple(signals), label=label)
@@ -264,6 +286,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
         (Signal.DS_POP, None),
         (Signal.LATCH_FLAGS, None),
+        (Signal.LATCH_CARRY, None),
         _RET_FETCH,
     ),
     _mi(
@@ -272,6 +295,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
         (Signal.DS_POP, None),
         (Signal.LATCH_FLAGS, None),
+        (Signal.LATCH_CARRY, None),
         _RET_FETCH,
     ),
     _mi(
@@ -488,6 +512,83 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_AT_DEPTH),
         _RET_FETCH,
     ),
+    # --- bitwise (binary): pop NOS, result -> TOS, set Z/N ---
+    _mi(
+        "AND",
+        (Signal.ALU_OP, Sel.ALU_AND),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.DS_POP, None),
+        (Signal.LATCH_FLAGS, None),
+        _RET_FETCH,
+    ),
+    _mi(
+        "OR",
+        (Signal.ALU_OP, Sel.ALU_OR),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.DS_POP, None),
+        (Signal.LATCH_FLAGS, None),
+        _RET_FETCH,
+    ),
+    _mi(
+        "XOR",
+        (Signal.ALU_OP, Sel.ALU_XOR),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.DS_POP, None),
+        (Signal.LATCH_FLAGS, None),
+        _RET_FETCH,
+    ),
+    # --- bitwise NOT (unary): no pop ---
+    _mi(
+        "NOT",
+        (Signal.ALU_OP, Sel.ALU_NOT),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.LATCH_FLAGS, None),
+        _RET_FETCH,
+    ),
+    # --- arithmetic with carry: also latch the carry flag ---
+    _mi(
+        "ADC",
+        (Signal.ALU_OP, Sel.ALU_ADC),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.DS_POP, None),
+        (Signal.LATCH_FLAGS, None),
+        (Signal.LATCH_CARRY, None),
+        _RET_FETCH,
+    ),
+    _mi(
+        "SBB",
+        (Signal.ALU_OP, Sel.ALU_SBB),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
+        (Signal.DS_POP, None),
+        (Signal.LATCH_FLAGS, None),
+        (Signal.LATCH_CARRY, None),
+        _RET_FETCH,
+    ),
+    # --- A / B register moves to and from the data stack ---
+    _mi(
+        "MVAT",
+        (Signal.LATCH_A, Sel.A_FROM_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
+        _RET_FETCH,
+    ),
+    _mi(
+        "MVBT",
+        (Signal.LATCH_B, Sel.B_FROM_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
+        _RET_FETCH,
+    ),
+    _mi(
+        "PSHA",
+        (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_A),
+        _RET_FETCH,
+    ),
+    _mi(
+        "PSHB",
+        (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
+        (Signal.LATCH_TOS, Sel.TOS_FROM_B),
+        _RET_FETCH,
+    ),
 )
 
 
@@ -527,4 +628,14 @@ DISPATCH: dict[Opcode, int] = {
     Opcode.STAI: M_STAI_1,
     Opcode.STBI: M_STBI_1,
     Opcode.PICK: M_PICK,
+    Opcode.AND: M_AND,
+    Opcode.OR: M_OR,
+    Opcode.XOR: M_XOR,
+    Opcode.NOT: M_NOT,
+    Opcode.ADC: M_ADC,
+    Opcode.SBB: M_SBB,
+    Opcode.MVAT: M_MVAT,
+    Opcode.MVBT: M_MVBT,
+    Opcode.PSHA: M_PSHA,
+    Opcode.PSHB: M_PSHB,
 }

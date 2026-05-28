@@ -11,19 +11,19 @@ tick_limit: 1000000
 log_enabled: true
 log_head_lines: 8
 expected_log_head: |
-  T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T00002  m_PC=04 DECODE      PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; JMP 0x1067
-  T00003  m_PC=00 JMP         PC=1067  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T00004  m_PC=01 FETCH       PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T00005  m_PC=02 DECODE      PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; NOP
-  T00006  m_PC=00 NOP         PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T00007  m_PC=01 FETCH       PC=1069  IR=40000010  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T00008  m_PC=31 DECODE      PC=1069  IR=40000010  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; PUSH 0x0010
+  T00001  m_PC=01 FETCH       PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T00002  m_PC=04 DECODE      PC=0001  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0  ; JMP 0x1067
+  T00003  m_PC=00 JMP         PC=1067  IR=02001067  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T00004  m_PC=01 FETCH       PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T00005  m_PC=02 DECODE      PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0  ; NOP
+  T00006  m_PC=00 NOP         PC=1068  IR=00000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T00007  m_PC=01 FETCH       PC=1069  IR=40000010  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T00008  m_PC=31 DECODE      PC=1069  IR=40000010  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0  ; PUSH 0x0010
 log_tail_lines: 4
 expected_log_tail: |
-  T01342  m_PC=01 FETCH       PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0
-  T01343  m_PC=03 DECODE      PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; HALT
-  T01344  m_PC=03 HALT        PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0  ; HALT
+  T01342  m_PC=01 FETCH       PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0
+  T01343  m_PC=03 DECODE      PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0  ; HALT
+  T01344  m_PC=03 HALT        PC=1070  IR=01000000  TOS=          0  A=0000 B=0000  DS[0]  RS[0]  Z=0 N=0 C=0  ; HALT
   ; halted: HALT
 listing_head_lines: 20
 expected_listing_head: |

@@ -26,6 +26,12 @@ class Opcode(IntEnum):
     NEG = 0x16
     INC = 0x17
     DEC = 0x18
+    AND = 0x19
+    OR = 0x1A
+    XOR = 0x1B
+    NOT = 0x1C
+    ADC = 0x1D  # add with carry: TOS <- NOS + TOS + C
+    SBB = 0x1E  # subtract with borrow: TOS <- NOS - TOS - C
 
     LOAD = 0x20
     STORE = 0x21
@@ -42,6 +48,10 @@ class Opcode(IntEnum):
     LDBI = 0x27  # push MEM[B]; B <- B + 1
     STAI = 0x28  # MEM[A] <- pop; A <- A + 1
     STBI = 0x29  # MEM[B] <- pop; B <- B + 1
+    MVAT = 0x2A  # A <- pop TOS (set A from a runtime value)
+    MVBT = 0x2B  # B <- pop TOS
+    PSHA = 0x2C  # push TOS; TOS <- A
+    PSHB = 0x2D  # push TOS; TOS <- B
 
     INPUT = 0x30
     OUTPUT = 0x31
