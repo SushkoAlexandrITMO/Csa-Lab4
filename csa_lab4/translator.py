@@ -115,6 +115,7 @@ def _looks_like_int(text: str) -> bool:
 
 # Parser
 
+
 @dataclass(frozen=True)
 class Symbol:
     name: str
@@ -165,7 +166,6 @@ def _parse_form(tokens: list[Token], pos: int) -> tuple[Form, int]:
 
 @dataclass
 class CodeItem:
-
     opcode: Opcode
     operand: int = 0
     operand_label: str | None = None
@@ -174,7 +174,6 @@ class CodeItem:
 
 
 # Compiler-
-
 
 PRIMITIVE_BINARY: dict[str, Opcode] = {
     "+": Opcode.ADD,
@@ -645,8 +644,8 @@ def _expect_symbol(form: Form) -> str:
     return form.name
 
 
-
 # Linker
+
 
 @dataclass
 class LinkedProgram:
@@ -703,8 +702,6 @@ def link(compiler: Compiler, code_base: int = DEFAULT_CODE_BASE) -> LinkedProgra
 
 def image_to_bytes(image: list[int]) -> bytes:
     return b"".join(int(w & 0xFFFFFFFF).to_bytes(4, byteorder="little", signed=False) for w in image)
-
-
 
 
 def translate(source: str) -> tuple[bytes, str]:
