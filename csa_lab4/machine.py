@@ -53,7 +53,6 @@ OUTPUT_PORT_NUM: int = 2
 
 @dataclass
 class IO:
-
     input_buffer: list[int] = field(default_factory=list)
     output_chunks: list[str] = field(default_factory=list)
 
