@@ -393,12 +393,12 @@ ROM микрокода — массив из 47 `MicroInstr`'ов (`csa_lab4/mic
 
 Полный пример микрокода для ADD:
 
-```python
+```text
 _mi(
     "ADD",
     (Signal.ALU_OP, Sel.ALU_ADD),       # выход ALU = NOS + TOS
     (Signal.LATCH_TOS, Sel.TOS_FROM_ALU),
-    (Signal.DS_POP, None),               # один уровень снимается со стека
+    (Signal.DS_POP, None),              # один уровень снимается со стека
     (Signal.LATCH_FLAGS, None),
     (Signal.LATCH_M_PC, Sel.M_PC_FETCH),
 )
