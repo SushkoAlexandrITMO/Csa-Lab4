@@ -430,7 +430,7 @@ _mi(
 pytest -q
 ```
 
-121 тест:
+5 тестов:
 - `tests/test_isa.py` — round-trip для всех опкодов и операндов
 - `tests/test_microcode.py` — структурные инварианты ROM (покрытие, термин, селекторы)
 - `tests/test_machine.py` — e2e «in-place» программы (без транслятора), проверяет каждый опкод и tick-hook
