@@ -32,10 +32,6 @@ class Opcode(IntEnum):
     LOADI = 0x22
     STOREI = 0x23
 
-    # Address registers A and B with post-increment indirection.
-    # A/B are 16-bit pointers used ONLY for memory access — they never
-    # participate in ALU operations, so the architecture remains stack-based
-    # for computation while pointer iteration becomes a single instruction.
     LDA = 0x24  # A <- operand (immediate address)
     LDB = 0x25  # B <- operand
     LDAI = 0x26  # push MEM[A]; A <- A + 1
