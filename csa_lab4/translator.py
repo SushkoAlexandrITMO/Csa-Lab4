@@ -1,26 +1,3 @@
-"""Lisp -> binary translator.
-
-Pipeline:
-  text  ->  tokens  ->  AST  ->  IR (labelled instructions + data words)
-        ->  binary image + .lst listing
-
-The compiler tracks a *stack layout* — an ordered list of named slots
-representing the current shape of the data stack at each point in the
-emitted code. Variable references resolve to ``DUP`` (depth 0),
-``OVER`` (depth 1), or ``PICK depth`` for arbitrary deeper accesses.
-
-Top-level forms:
-  (setq name expr)                define / update a global, expression-valued
-  (defun name (a b) body)         define a procedure
-  (if cond then else)             every form is an expression
-  (progn a b c)                   sequence; value of the last expression
-  (let ((x e) (y e2)) body)       lexical bindings, also expression-valued
-  arithmetic   + - * / mod neg
-  comparison   = < >              materialize 1 (true) or 0 (false)
-  primitives   load store print-char print-int read-char halt
-  literals     integers, strings  ("..."  -> pstr in data segment)
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -30,20 +7,12 @@ from pathlib import Path
 
 from csa_lab4.isa import OPERAND_BITS, Instr, Opcode, encode, mnemonic
 
-# Reserve the low addresses for the entry-point jump and a small interrupt
-# vector area (not used in the stream variant, but kept symmetric with the
-# memory layout described in the report).
 DATA_SEGMENT_START: int = 0x0010
 DEFAULT_CODE_BASE: int = 0x1000
 
 OPERAND_LIMIT_POS: int = (1 << (OPERAND_BITS - 1)) - 1
 OPERAND_LIMIT_NEG: int = -(1 << (OPERAND_BITS - 1))
 
-
-# Standard library, injected ahead of the user program. Implements the
-# pstr helpers in our lisp itself so the runtime cost is visible in the
-# journal and the report. Kept tiny — only what's required by the
-# specified golden tests.
 PRELUDE_SOURCE: str = """
 (defun __pstr_print_loop (ptr n)
   (if (= n 0)
@@ -74,9 +43,7 @@ class TranslationError(Exception):
     """Raised when the input program cannot be compiled."""
 
 
-# ---------------------------------------------------------------------------
 # Lexer
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -99,7 +66,7 @@ def tokenize(source: str) -> list[Token]:
         if ch.isspace():
             i += 1
             continue
-        if ch == ";":  # line comment
+        if ch == ";":
             while i < len(source) and source[i] != "\n":
                 i += 1
             continue
@@ -127,7 +94,6 @@ def tokenize(source: str) -> list[Token]:
             tokens.append(Token("str", "".join(buf), line))
             i = j + 1
             continue
-        # Number or symbol
         j = i
         while j < len(source) and not source[j].isspace() and source[j] not in '()";':
             j += 1
@@ -147,10 +113,7 @@ def _looks_like_int(text: str) -> bool:
     return bool(s) and all(c.isdigit() for c in s)
 
 
-# ---------------------------------------------------------------------------
-# Parser (AST = Python lists of atoms; atoms are int | str-literal | Symbol)
-# ---------------------------------------------------------------------------
-
+# Parser
 
 @dataclass(frozen=True)
 class Symbol:
@@ -197,30 +160,20 @@ def _parse_form(tokens: list[Token], pos: int) -> tuple[Form, int]:
     raise TranslationError(f"unknown token kind {tok.kind!r} at line {tok.line}")
 
 
-# ---------------------------------------------------------------------------
-# IR: labelled instructions and data words
-# ---------------------------------------------------------------------------
+# IR
 
 
 @dataclass
 class CodeItem:
-    """A single addressable code word.
-
-    For instructions whose operand is a symbolic label, ``operand_label`` is
-    set; ``operand`` is filled in by the linker. ``label`` may be set for
-    items that are jump/call targets.
-    """
 
     opcode: Opcode
     operand: int = 0
     operand_label: str | None = None
     label: str | None = None
-    source: str = ""  # human-readable annotation for the .lst listing
+    source: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Compiler
-# ---------------------------------------------------------------------------
+# Compiler-
 
 
 PRIMITIVE_BINARY: dict[str, Opcode] = {
@@ -238,7 +191,6 @@ PRIMITIVE_UNARY: dict[str, Opcode] = {
 }
 
 COMPARISONS: dict[str, Opcode] = {
-    # All implemented through CMP + conditional materialisation.
     "=": Opcode.JZ,  # equal -> Z=1
     "<": Opcode.JS,  # a < b means a - b is negative -> N=1
     ">": Opcode.JNZ,  # placeholder, treated specially
@@ -248,28 +200,21 @@ COMPARISONS: dict[str, Opcode] = {
 @dataclass
 class Compiler:
     code: list[CodeItem] = field(default_factory=list)
-    data: list[int] = field(default_factory=list)  # words in the data segment
+    data: list[int] = field(default_factory=list) 
 
-    # Variable name -> data-segment address.
     globals_: dict[str, int] = field(default_factory=dict)
-    # Function name -> code label.
+
     functions: dict[str, str] = field(default_factory=dict)
-    # Stack layout: each entry is a slot name ("" for anonymous values).
     stack: list[str] = field(default_factory=list)
 
     _label_counter: int = 0
 
-    # ------------------------------------------------------------------ utils
     def emit(self, opcode: Opcode, operand: int = 0, *, operand_label: str | None = None, source: str = "") -> None:
         self.code.append(CodeItem(opcode=opcode, operand=operand, operand_label=operand_label, source=source))
 
     def attach_label(self, label: str) -> None:
-        # Attach to the next emitted instruction. We materialise via a NOP if
-        # the next instruction hasn't been emitted yet.
         if self.code and self.code[-1].label is None:
-            # Attach to a new NOP so we always have a stable target word.
             pass
-        # Simpler: always create a fresh NOP that carries the label.
         self.code.append(CodeItem(opcode=Opcode.NOP, label=label, source=f"{label}:"))
 
     def gen_label(self, prefix: str) -> str:
@@ -295,34 +240,22 @@ class Compiler:
                 return depth
         return None
 
-    # --------------------------------------------------------------- compile
     def compile_program(self, program: list[Form]) -> None:
-        # Prelude is parsed every compilation — small, no need to cache.
         prelude = parse(tokenize(PRELUDE_SOURCE))
         all_forms = [*prelude, *program]
 
-        # First pass: collect global variable definitions and function
-        # declarations so forward references resolve.
         for form in all_forms:
             self._collect_top_level(form)
-
-        # Second pass: compile prelude defuns (they each emit a JMP-over-body
-        # so execution falls straight through them at run time), then the
-        # user program starting at the ``_start`` label.
         for form in prelude:
             assert _is_call(form, "defun"), "prelude must contain only defuns"
             self.compile_defun(form)  # type: ignore[arg-type]
 
-        # Memory layout: the linker plants a synthesised ``JMP _start`` at
-        # address 0 (the reset vector); ``_start`` is the entry into user code.
         self.attach_label("_start")
         for form in program:
             if _is_call(form, "defun"):
                 self.compile_defun(form)  # type: ignore[arg-type]
                 continue
             self.compile_expr(form)
-            # Drop the expression's value: top-level expressions are evaluated
-            # for their side effects.
             self.emit(Opcode.DROP, source="DROP  ; discard top-level value")
             self.pop_slot()
         self.emit(Opcode.HALT, source="HALT")
@@ -342,7 +275,6 @@ class Compiler:
             name = _expect_symbol(form[1])
             self.functions[name] = f"fn_{name}"
 
-    # ---- top-level forms ----
     def compile_defun(self, form: list[Form]) -> None:
         name = _expect_symbol(form[1])
         params = form[2]
@@ -351,23 +283,19 @@ class Compiler:
         param_names = [_expect_symbol(p) for p in params]
         body = form[3:]
 
-        # Skip past the function body when running top-to-bottom.
         end_label = self.gen_label("defun_end")
         self.emit(Opcode.JMP, operand_label=end_label, source=f"JMP {end_label}  ; skip body of {name}")
 
-        # Function entry. Args are on top of the data stack: layout = params.
         self.attach_label(self.functions[name])
         saved_stack = self.stack[:]
         self.stack = list(param_names)
 
-        # Body — sequence of expressions, value of the last one is the return.
         for i, expr in enumerate(body):
             self.compile_expr(expr)
             if i < len(body) - 1:
                 self.emit(Opcode.DROP, source="DROP  ; sequence non-final value")
                 self.pop_slot()
 
-        # Epilogue: result is on top. Args are buried under it. NIP each.
         for _ in param_names:
             self.emit(Opcode.SWAP, source="SWAP  ; bury result")
             self.emit(Opcode.DROP, source="DROP  ; pop one arg")
@@ -375,7 +303,6 @@ class Compiler:
         self.stack = saved_stack
         self.attach_label(end_label)
 
-    # ---- expressions ----
     def compile_expr(self, form: Form) -> None:
         if isinstance(form, int):
             self.compile_int_literal(form)
@@ -396,14 +323,12 @@ class Compiler:
             self.emit(Opcode.PUSH, value, source=f"PUSH {value}")
             self.push_slot()
             return
-        # Too wide for immediate — spill into the data segment.
         addr = self.alloc_data_word(value & ((1 << 32) - 1))
         self.emit(Opcode.LOAD, addr, source=f"LOAD 0x{addr:04X}  ; literal {value}")
         self.push_slot()
 
     def compile_string_literal(self, text: str) -> None:
         addr = self._intern_pstr(text)
-        # Push the string's start address (length word).
         self.compile_int_literal(addr)
 
     def _intern_pstr(self, text: str) -> int:
@@ -496,23 +421,19 @@ class Compiler:
             return
         raise TranslationError(f"unknown function or special form: {name}")
 
-    # ----- specific compilers ----
     def _compile_binary(self, opcode: Opcode, args: list[Form], name: str) -> None:
         if len(args) != 2:
             raise TranslationError(f"({name} a b) takes 2 args, got {len(args)}")
         self.compile_expr(args[0])
         self.compile_expr(args[1])
         self.emit(opcode, source=opcode.name)
-        # binary op pops 2, pushes 1
         self.pop_slot()
-        # net: stack height -1
 
     def _compile_unary(self, opcode: Opcode, args: list[Form], name: str) -> None:
         if len(args) != 1:
             raise TranslationError(f"({name} a) takes 1 arg")
         self.compile_expr(args[0])
         self.emit(opcode, source=opcode.name)
-        # stack height unchanged
 
     def _compile_compare(self, name: str, args: list[Form]) -> None:
         if len(args) != 2:
@@ -520,7 +441,6 @@ class Compiler:
         self.compile_expr(args[0])
         self.compile_expr(args[1])
         self.emit(Opcode.CMP, source=f"CMP   ; {name}")
-        # CMP pops both operands, sets flags.
         self.pop_slot()
         self.pop_slot()
 
@@ -528,8 +448,6 @@ class Compiler:
         end_label = self.gen_label("cmp_end")
         branch_op = {"=": Opcode.JZ, "<": Opcode.JS, ">": None}[name]
         if name == ">":
-            # a > b  <=>  a - b > 0  <=>  !Z and !N
-            # Emit: if Z -> false; if N -> false; else true.
             false_first = self.gen_label("cmp_false")
             self.emit(Opcode.JZ, operand_label=false_first, source=f"JZ {false_first}")
             self.emit(Opcode.JS, operand_label=false_first, source=f"JS {false_first}")
@@ -565,10 +483,6 @@ class Compiler:
         if len(args) not in (2, 3):
             raise TranslationError("(if cond then [else])")
         self.compile_expr(args[0])
-        # Cond on top: 0 = false. We need JZ to else branch; but JZ tests
-        # the Z flag, not the stack value. Materialised values used CMP-based
-        # construction that already set Z=(value == 0)? No — last op is PUSH
-        # which doesn't touch flags. So compare to 0 explicitly.
         self.emit(Opcode.PUSH, 0, source="PUSH 0  ; if-cond cmp")
         self.push_slot()
         self.emit(Opcode.CMP, source="CMP   ; if-cond -> Z")
@@ -577,10 +491,8 @@ class Compiler:
         else_label = self.gen_label("if_else")
         end_label = self.gen_label("if_end")
         self.emit(Opcode.JZ, operand_label=else_label, source=f"JZ {else_label}")
-        # Then branch: result on TOS at end.
         self.compile_expr(args[1])
         self.emit(Opcode.JMP, operand_label=end_label, source=f"JMP {end_label}")
-        # Reset stack height for parallel compile of else branch.
         self.pop_slot()
         self.attach_label(else_label)
         if len(args) == 3:
@@ -613,7 +525,6 @@ class Compiler:
                 raise TranslationError("each let binding is (name expr)")
             n = _expect_symbol(b[0])
             self.compile_expr(b[1])
-            # Mark the slot as bound to `n` (was anonymous).
             self.stack[-1] = n
             names.append(n)
         body = args[1:]
@@ -622,27 +533,21 @@ class Compiler:
             if i < len(body) - 1:
                 self.emit(Opcode.DROP, source="DROP  ; let body non-final")
                 self.pop_slot()
-        # Result is on top, with each named slot just below in reverse order.
-        # NIP each binding (SWAP DROP) so only the result remains.
         for n in names:
             self.emit(Opcode.SWAP, source=f"SWAP  ; bury result over '{n}'")
             self.emit(Opcode.DROP, source=f"DROP  ; remove let-binding '{n}'")
-            # SWAP keeps height; DROP removes one slot — namely the named one
-            # which is now at position [-2] before the DROP collapses it.
             del self.stack[-2]
 
     def _compile_halt(self, args: list[Form]) -> None:
         if args:
             raise TranslationError("(halt) takes no args")
         self.emit(Opcode.HALT, source="HALT")
-        # Value: by convention 0 (never reached, but keep stack balanced).
         self.push_slot()
 
     def _compile_io_out(self, args: list[Form], port: int, source_name: str) -> None:
         if len(args) != 1:
             raise TranslationError(f"({source_name} v) takes 1 arg")
         self.compile_expr(args[0])
-        # Keep a copy as the expression value, since OUTPUT pops one.
         self.emit(Opcode.DUP, source="DUP   ; keep value as expr result")
         self.push_slot()
         self.emit(Opcode.OUTPUT, port, source=f"OUTPUT {port}  ; {source_name}")
@@ -661,7 +566,6 @@ class Compiler:
             self.emit(Opcode.LOAD, args[0], source=f"LOAD 0x{args[0]:04X}")
             self.push_slot()
             return
-        # General: compute address on stack, then LOADI.
         self.compile_expr(args[0])
         self.emit(Opcode.LOADI, source="LOADI ; indirect load")
 
@@ -678,8 +582,6 @@ class Compiler:
         raise TranslationError("(store <dynamic addr> value) — use (store-at addr value)")
 
     def _compile_store_at(self, args: list[Form]) -> None:
-        # (store-at addr value): write value to memory[addr] where addr is a
-        # runtime value. Expression result is the stored value (mirroring setq).
         if len(args) != 2:
             raise TranslationError("(store-at addr value) takes 2 args")
         self.compile_expr(args[1])  # value on top
@@ -687,8 +589,6 @@ class Compiler:
         self.push_slot()
         self.compile_expr(args[0])  # addr on top
         self.emit(Opcode.STOREI, source="STOREI ; (store-at ...)")
-        # STOREI pops addr (TOS) and value (NOS); commit leaves one value
-        # below (our retained copy from the first DUP) on top.
         self.pop_slot()
         self.pop_slot()
 
@@ -701,7 +601,6 @@ class Compiler:
             operand_label="fn___pstr_print",
             source="CALL __pstr_print",
         )
-        # CALL pops args, pushes one return — net 0 slot change.
 
     def _compile_read_string(self, args: list[Form]) -> None:
         if len(args) != 1:
@@ -714,8 +613,6 @@ class Compiler:
         )
 
     def _compile_buffer_of(self, args: list[Form]) -> None:
-        # (buffer-of N) — reserve N consecutive data words and push the start
-        # address. Used to allocate pstr buffers for read-string / sort.
         if len(args) != 1 or not isinstance(args[0], int):
             raise TranslationError("(buffer-of N) needs a literal positive integer")
         size = args[0]
@@ -727,20 +624,15 @@ class Compiler:
 
     def _compile_call(self, name: str, args: list[Form]) -> None:
         label = self.functions[name]
-        # Push args left-to-right so the last is on TOS — matches how the
-        # function's params were registered in defun (list order).
         for a in args:
             self.compile_expr(a)
         self.emit(Opcode.CALL, operand_label=label, source=f"CALL {label}  ; ({name} ...)")
-        # Function pops its args and pushes one return value.
         for _ in args:
             self.pop_slot()
         self.push_slot()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _is_call(form: Form, head: str) -> bool:
@@ -753,10 +645,8 @@ def _expect_symbol(form: Form) -> str:
     return form.name
 
 
-# ---------------------------------------------------------------------------
-# Linker: place code, resolve labels, build image
-# ---------------------------------------------------------------------------
 
+# Linker
 
 @dataclass
 class LinkedProgram:
@@ -765,7 +655,6 @@ class LinkedProgram:
 
 
 def link(compiler: Compiler, code_base: int = DEFAULT_CODE_BASE) -> LinkedProgram:
-    # Code placement: assign every CodeItem an address.
     code_address = code_base
     label_addr: dict[str, int] = {}
     item_addr: list[int] = []
@@ -777,14 +666,12 @@ def link(compiler: Compiler, code_base: int = DEFAULT_CODE_BASE) -> LinkedProgra
             label_addr[item.label] = code_address
         code_address += 1
 
-    # Resolve operand_label to actual addresses.
     for item in compiler.code:
         if item.operand_label is not None:
             if item.operand_label not in label_addr:
                 raise TranslationError(f"unresolved label: {item.operand_label}")
             item.operand = label_addr[item.operand_label]
 
-    # Build the memory image: reset vector at 0, data segment, code segment.
     image_size = code_base + len(compiler.code)
     image = [0] * image_size
     if "_start" not in label_addr:
@@ -795,7 +682,6 @@ def link(compiler: Compiler, code_base: int = DEFAULT_CODE_BASE) -> LinkedProgra
     for i, item in enumerate(compiler.code):
         image[code_base + i] = encode(Instr(opcode=item.opcode, operand=item.operand))
 
-    # Listing: reset vector, then data section, then code section.
     lines: list[str] = []
     reset_word = image[0]
     lines.append(f"0000  {reset_word:08X}  JMP   0x{label_addr['_start']:04X}      ; reset vector")
@@ -819,9 +705,6 @@ def image_to_bytes(image: list[int]) -> bytes:
     return b"".join(int(w & 0xFFFFFFFF).to_bytes(4, byteorder="little", signed=False) for w in image)
 
 
-# ---------------------------------------------------------------------------
-# Public API and CLI
-# ---------------------------------------------------------------------------
 
 
 def translate(source: str) -> tuple[bytes, str]:
