@@ -1,5 +1,3 @@
-"""Tick-accurate microcoded stack-machine simulator."""
-
 from __future__ import annotations
 
 import argparse
@@ -23,7 +21,7 @@ class MachineError(RuntimeError):
 
 
 class HaltError(MachineError):
-    """Остановка почле HALT"""
+    """Остановка после HALT"""
 
 
 class StackError(MachineError):
@@ -110,7 +108,6 @@ class DataPath:
 
 
 class Snapshot(NamedTuple):
-
     pc: int
     ar: int
     dr: int
@@ -151,6 +148,7 @@ def _snapshot(dp: DataPath) -> Snapshot:
         mem_at_ar=dp.memory[dp.ar & ADDR_MASK],
     )
 
+
 # Control Unit
 
 
@@ -164,7 +162,7 @@ class ControlUnit:
         self.log_enabled: bool = log_enabled
         self.log_lines: list[str] = []
 
-    #ALU
+    # ----- ALU --------------------------------------------------------------
 
     @staticmethod
     def _alu(sel: Sel | None, snap: Snapshot) -> int:
@@ -199,7 +197,7 @@ class ControlUnit:
             return _signed_word(a - 1)
         raise MachineError(f"bad ALU op selector: {sel}")
 
-    #source selectors
+    # ----- source selectors -------------------------------------------------
 
     @staticmethod
     def _next_pc(sel: Sel | None, snap: Snapshot) -> int:
@@ -304,8 +302,6 @@ class ControlUnit:
                 raise MachineError(f"PICK depth {depth} exceeds data stack size {len(ds)}")
             return ds[-depth], False
         raise MachineError(f"bad TOS selector: {sel}")
-
-    #main tick
 
     def tick(self) -> None:
         if self.halted:
@@ -428,7 +424,7 @@ class ControlUnit:
             self.halted = True
             raise HaltError("HALT")
 
-    #logging
+    # logging
 
     def _log_tick(self, micro: object, pre_snap: Snapshot) -> None:
         dp = self.data_path
@@ -513,7 +509,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def assemble_image(words: list[int]) -> bytes:
-    """Helper: pack a list of 32-bit words into a little-endian binary blob."""
     return b"".join(int(w & WORD_MASK).to_bytes(4, byteorder="little", signed=False) for w in words)
 
 
