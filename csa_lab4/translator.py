@@ -200,7 +200,7 @@ COMPARISONS: dict[str, Opcode] = {
 @dataclass
 class Compiler:
     code: list[CodeItem] = field(default_factory=list)
-    data: list[int] = field(default_factory=list) 
+    data: list[int] = field(default_factory=list)
 
     globals_: dict[str, int] = field(default_factory=dict)
 
