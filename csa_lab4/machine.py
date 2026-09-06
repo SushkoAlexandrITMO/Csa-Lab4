@@ -383,7 +383,7 @@ class ControlUnit:
             elif sig is Signal.HALT:
                 halt = True
             elif sig in (Signal.MEM_READ, Signal.ALU_OP, Signal.IO_READ):
-                pass 
+                pass
 
         self.data_path.pc = next_pc & ADDR_MASK
         self.data_path.ar = next_ar & ADDR_MASK
