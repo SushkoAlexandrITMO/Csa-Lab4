@@ -19,15 +19,11 @@ OPERAND_SIGN_BIT: int = 1 << (OPERAND_BITS - 1)
 
 
 class MachineError(RuntimeError):
-    """Base class for simulator runtime errors."""
 
 
 class HaltError(MachineError):
-    """Raised when the machine halts (HALT signal or input exhausted)."""
-
 
 class StackError(MachineError):
-    """Underflow / overflow on the data or return stack."""
 
 
 def _signed_word(value: int) -> int:
@@ -44,9 +40,7 @@ def _signed_operand(value: int) -> int:
     return value
 
 
-# ---------------------------------------------------------------------------
 # IO subsystem (stream + port)
-# ---------------------------------------------------------------------------
 
 INPUT_PORT_CHAR: int = 0
 OUTPUT_PORT_CHAR: int = 1
@@ -55,12 +49,6 @@ OUTPUT_PORT_NUM: int = 2
 
 @dataclass
 class IO:
-    """Port-mapped stream IO.
-
-    Port 0: input — one character per read, ``HaltError`` when buffer empty.
-    Port 1: output — TOS interpreted as 8-bit char and appended to stdout.
-    Port 2: output — TOS interpreted as signed integer, decimal text emitted.
-    """
 
     input_buffer: list[int] = field(default_factory=list)
     output_chunks: list[str] = field(default_factory=list)
@@ -90,9 +78,7 @@ class IO:
         return "".join(self.output_chunks)
 
 
-# ---------------------------------------------------------------------------
 # DataPath
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -105,8 +91,8 @@ class DataPath:
     ar: int = 0
     dr: int = 0
     ir: int = 0
-    a: int = 0  # auxiliary address register A (16-bit pointer)
-    b: int = 0  # auxiliary address register B (16-bit pointer)
+    a: int = 0
+    b: int = 0
     flag_z: bool = False
     flag_n: bool = False
 
@@ -121,7 +107,6 @@ class DataPath:
 
 
 class Snapshot(NamedTuple):
-    """Sampled DataPath state at the start of a tick (hot path — NamedTuple)."""
 
     pc: int
     ar: int
@@ -163,10 +148,7 @@ def _snapshot(dp: DataPath) -> Snapshot:
         mem_at_ar=dp.memory[dp.ar & ADDR_MASK],
     )
 
-
-# ---------------------------------------------------------------------------
 # Control Unit
-# ---------------------------------------------------------------------------
 
 
 class ControlUnit:
@@ -179,7 +161,7 @@ class ControlUnit:
         self.log_enabled: bool = log_enabled
         self.log_lines: list[str] = []
 
-    # ----- ALU --------------------------------------------------------------
+    #ALU
 
     @staticmethod
     def _alu(sel: Sel | None, snap: Snapshot) -> int:
@@ -214,7 +196,7 @@ class ControlUnit:
             return _signed_word(a - 1)
         raise MachineError(f"bad ALU op selector: {sel}")
 
-    # ----- source selectors -------------------------------------------------
+    #source selectors
 
     @staticmethod
     def _next_pc(sel: Sel | None, snap: Snapshot) -> int:
@@ -320,7 +302,7 @@ class ControlUnit:
             return ds[-depth], False
         raise MachineError(f"bad TOS selector: {sel}")
 
-    # ----- main tick --------------------------------------------------------
+    #main tick
 
     def tick(self) -> None:
         if self.halted:
@@ -329,7 +311,6 @@ class ControlUnit:
         micro = MPROGRAM[self.m_pc]
         snap = _snapshot(self.data_path)
 
-        # Phase A: evaluate combinatorial outputs.
         alu_result: int | None = None
         io_data: int | None = None
         io_consume_port: int | None = None
@@ -340,7 +321,6 @@ class ControlUnit:
                 io_data = self.io.peek(snap.operand_unsigned & 0xFF)
                 io_consume_port = snap.operand_unsigned & 0xFF
 
-        # Phase B: compute new values for every potentially-latched destination.
         next_pc = snap.pc
         next_ar = snap.ar
         next_dr = snap.dr
@@ -401,9 +381,8 @@ class ControlUnit:
             elif sig is Signal.HALT:
                 halt = True
             elif sig in (Signal.MEM_READ, Signal.ALU_OP, Signal.IO_READ):
-                pass  # already handled in phase A or via source selectors
+                pass 
 
-        # Phase C: commit.
         self.data_path.pc = next_pc & ADDR_MASK
         self.data_path.ar = next_ar & ADDR_MASK
         self.data_path.dr = _signed_word(next_dr)
@@ -446,7 +425,7 @@ class ControlUnit:
             self.halted = True
             raise HaltError("HALT")
 
-    # ----- logging ---------------------------------------------------------
+    #logging
 
     def _log_tick(self, micro: object, pre_snap: Snapshot) -> None:
         dp = self.data_path
@@ -470,9 +449,7 @@ class ControlUnit:
         self.log_lines.append(line)
 
 
-# ---------------------------------------------------------------------------
 # Binary loader and simulator entry point
-# ---------------------------------------------------------------------------
 
 
 def load_binary(blob: bytes) -> list[int]:
@@ -492,15 +469,6 @@ def simulate(
     *,
     log_enabled: bool = True,
 ) -> tuple[str, str]:
-    """Run the simulator.
-
-    ``tick_hook`` is invoked **after every tick** with the live ControlUnit.
-    Returning ``False`` cleanly stops the simulation at that tick boundary.
-    This is what enables tick-level interruption: any tick in the program may
-    be the last one, regardless of which microinstruction it executed. The
-    same effect is available from outside by driving :meth:`ControlUnit.tick`
-    directly.
-    """
     image = load_binary(binary)
     dp = DataPath.from_image(image)
     io = IO(input_buffer=[ord(c) for c in stdin_data])
