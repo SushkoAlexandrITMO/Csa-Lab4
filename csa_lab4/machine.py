@@ -21,8 +21,10 @@ OPERAND_SIGN_BIT: int = 1 << (OPERAND_BITS - 1)
 class MachineError(RuntimeError):
     """Класс для симуляции ошибок во время работы"""
 
+
 class HaltError(MachineError):
     """Остановка почле HALT"""
+
 
 class StackError(MachineError):
     """Underflow / overflow ошибки"""
