@@ -1,19 +1,4 @@
-"""Microprogram ROM, signals, selectors and the dispatch table.
-
-The microcoded control unit runs at one microinstruction per tick. Each
-microinstruction is a fixed set of control signals that fire in parallel.
-
-Tick semantics (synchronous, sample-before-write):
-  * all source values (TOS, DS top, AR, DR, PC, flags, IR.operand, memory)
-    are sampled at the rising edge that starts the tick;
-  * all destinations latch the new values at the rising edge that ends the
-    tick. Combinatorial paths (ALU, memory read, dispatch ROM) compute their
-    outputs from start-of-tick sources.
-
-The microprogram is a flat ROM. ``DISPATCH`` maps an opcode to the entry
-point of the corresponding executor. Each executor ends with a
-``LATCH_M_PC -> M_PC_FETCH`` signal returning control to the fetch routine.
-"""
+"""Microprogram ROM, signals, selectors and the dispatch table."""
 
 from __future__ import annotations
 
@@ -24,7 +9,6 @@ from csa_lab4.isa import Opcode
 
 
 class Signal(Enum):
-    """Discrete control lines."""
 
     LATCH_PC = auto()
     LATCH_AR = auto()
@@ -55,9 +39,8 @@ class Signal(Enum):
 
 
 class Sel(Enum):
-    """Selector values multiplexed onto a signal's data path."""
 
-    # PC sources
+    # PC
     PC_PLUS_ONE = auto()
     PC_FROM_OPERAND = auto()
     PC_FROM_RS_TOP = auto()
@@ -65,24 +48,24 @@ class Sel(Enum):
     PC_FROM_OPERAND_IF_NZ = auto()
     PC_FROM_OPERAND_IF_N = auto()
 
-    # AR sources
+    # AR
     AR_FROM_OPERAND = auto()
     AR_FROM_TOS = auto()
     AR_FROM_PC = auto()
     AR_FROM_A = auto()
     AR_FROM_B = auto()
 
-    # A / B sources
+    # A / B
     A_FROM_OPERAND = auto()
     A_FROM_PLUS_ONE = auto()
     B_FROM_OPERAND = auto()
     B_FROM_PLUS_ONE = auto()
 
-    # DR sources
+    # DR
     DR_FROM_MEM = auto()
     DR_FROM_TOS = auto()
 
-    # TOS sources
+    # TOS
     TOS_FROM_ALU = auto()
     TOS_FROM_DR = auto()
     TOS_FROM_MEM = auto()
@@ -90,27 +73,26 @@ class Sel(Enum):
     TOS_FROM_DS_TOP = auto()
     TOS_FROM_DS_POP = auto()
     TOS_FROM_IO = auto()
-    # PICK reads DS at depth = IR.operand (depth 0 == TOS, 1 == DS top, ...).
     TOS_FROM_DS_AT_DEPTH = auto()
 
-    # DS push source
+    # DS 
     DS_PUSH_TOS = auto()
 
-    # RS push source
+    # RS
     RS_PUSH_PC = auto()
     RS_PUSH_TOS = auto()
 
-    # DS replace-top source
+    # DS
     DS_REPLACE_TOP_TOS = auto()
 
-    # Memory write source
+    # Memory
     MEM_WRITE_TOS = auto()
     MEM_WRITE_DR = auto()
 
-    # IO data direction is implicit per signal; port comes from IR.operand.
+    # IO data 
     IO_PORT_FROM_OPERAND = auto()
 
-    # ALU operations
+    # ALU 
     ALU_ADD = auto()
     ALU_SUB = auto()
     ALU_MUL = auto()
@@ -120,7 +102,7 @@ class Sel(Enum):
     ALU_INC = auto()
     ALU_DEC = auto()
 
-    # Micro-PC next state
+    # Micro-PC 
     M_PC_PLUS_ONE = auto()
     M_PC_FETCH = auto()
     M_PC_DISPATCH = auto()
@@ -137,9 +119,7 @@ class MicroInstr:
     label: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Microprogram ROM addresses (named for readability and dispatch wiring).
-# ---------------------------------------------------------------------------
+# Microprogram ROM
 M_FETCH = 0  # IR <- MEM[PC]; PC++
 M_DECODE = 1  # m_PC <- DISPATCH(IR.opcode)
 
@@ -200,13 +180,11 @@ def _mi(label: str, *signals: SignalSpec) -> MicroInstr:
     return MicroInstr(signals=tuple(signals), label=label)
 
 
-# A jump back to fetch is the most common terminator.
 _RET_FETCH: SignalSpec = (Signal.LATCH_M_PC, Sel.M_PC_FETCH)
 _NEXT: SignalSpec = (Signal.LATCH_M_PC, Sel.M_PC_PLUS_ONE)
 
 
 MPROGRAM: tuple[MicroInstr, ...] = (
-    # --- fetch / decode ---
     _mi(
         "FETCH",
         (Signal.LATCH_IR, None),
@@ -218,7 +196,6 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         "DECODE",
         (Signal.LATCH_M_PC, Sel.M_PC_DISPATCH),
     ),
-    # --- control flow ---
     _mi("NOP", _RET_FETCH),
     _mi("HALT", (Signal.HALT, None)),
     _mi(
@@ -257,7 +234,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.RS_POP, None),
         _RET_FETCH,
     ),
-    # --- ALU (binary): pop NOS, result -> TOS, set flags ---
+    # ALU 
     _mi(
         "ADD",
         (Signal.ALU_OP, Sel.ALU_ADD),
@@ -298,7 +275,6 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_FLAGS, None),
         _RET_FETCH,
     ),
-    # --- CMP: ( a b -- ); flags = a - b; pop both ---
     _mi(
         "CMP.1",
         (Signal.ALU_OP, Sel.ALU_SUB),
@@ -311,7 +287,6 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
         _RET_FETCH,
     ),
-    # --- ALU (unary) ---
     _mi(
         "NEG",
         (Signal.ALU_OP, Sel.ALU_NEG),
@@ -333,7 +308,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_FLAGS, None),
         _RET_FETCH,
     ),
-    # --- memory: direct ---
+    # memory
     _mi(
         "LOAD.1",
         (Signal.LATCH_AR, Sel.AR_FROM_OPERAND),
@@ -356,7 +331,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
         _RET_FETCH,
     ),
-    # --- memory: indirect (address taken from TOS / NOS) ---
+    # memory
     _mi(
         "LOADI.1",
         (Signal.LATCH_AR, Sel.AR_FROM_TOS),
@@ -379,7 +354,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
         _RET_FETCH,
     ),
-    # --- I/O ---
+    # I/O
     _mi(
         "INPUT",
         (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
@@ -393,7 +368,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_POP),
         _RET_FETCH,
     ),
-    # --- stack manipulation ---
+    #stack manipulation
     _mi(
         "PUSH",
         (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
@@ -422,7 +397,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_TOS, Sel.TOS_FROM_DS_TOP),
         _RET_FETCH,
     ),
-    # --- address registers A / B (pointer iteration with post-increment) ---
+    #address registers A / B
     _mi(
         "LDA",
         (Signal.LATCH_A, Sel.A_FROM_OPERAND),
@@ -481,7 +456,7 @@ MPROGRAM: tuple[MicroInstr, ...] = (
         (Signal.LATCH_B, Sel.B_FROM_PLUS_ONE),
         _RET_FETCH,
     ),
-    # --- PICK (random access into the data stack by depth) ---
+    #PICK 
     _mi(
         "PICK",
         (Signal.DS_PUSH, Sel.DS_PUSH_TOS),
