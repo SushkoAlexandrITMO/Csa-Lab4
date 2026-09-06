@@ -1,12 +1,4 @@
-"""Tick-accurate microcoded stack-machine simulator.
-
-The simulator interprets the microprogram defined in :mod:`csa_lab4.microcode`.
-One Python call to :meth:`ControlUnit.tick` simulates exactly one hardware
-tick. Each tick samples every state register at the start of the tick
-(``Snapshot``), evaluates combinatorial paths (ALU, memory read, IO peek)
-from the snapshot, then commits new values to every latch at tick end.
-This mirrors a synchronous design with edge-triggered registers.
-"""
+"""Tick-accurate microcoded stack-machine simulator."""
 
 from __future__ import annotations
 
