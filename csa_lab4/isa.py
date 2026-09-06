@@ -32,7 +32,7 @@ class Opcode(IntEnum):
     LOADI = 0x22
     STOREI = 0x23
 
-    LDA = 0x24  # A <- operand (immediate address)
+    LDA = 0x24  # A <- operand 
     LDB = 0x25  # B <- operand
     LDAI = 0x26  # push MEM[A]; A <- A + 1
     LDBI = 0x27  # push MEM[B]; B <- B + 1
@@ -47,7 +47,7 @@ class Opcode(IntEnum):
     DROP = 0x51
     SWAP = 0x52
     OVER = 0x53
-    PICK = 0x54  # push a copy of ds at depth = operand (depth 0 == DUP, 1 == OVER)
+    PICK = 0x54 
 
 
 HAS_OPERAND: frozenset[Opcode] = frozenset(
@@ -85,7 +85,6 @@ class Instr:
 
 
 def encode(instr: Instr) -> int:
-    """Pack instruction as a 32-bit word: [opcode:8][reserved:8][operand:16]."""
     operand = instr.operand & OPERAND_MASK if instr.has_operand() else 0
     return ((int(instr.opcode) & 0xFF) << 24) | (operand & OPERAND_MASK)
 
